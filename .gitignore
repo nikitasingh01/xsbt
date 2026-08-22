@@ -1,0 +1,27 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Packaging / envs
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Backtest artifacts. The price cache is deliberately ignored: it is reproducible
+# via `xsbt fetch`, and checking in a few MB of vendor data is not our job.
+# Anchored with a leading slash: an unanchored `data/` also matches src/xsbt/data.
+/data/
+/runs/
+/reports/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

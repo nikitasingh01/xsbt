@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xsbt"
+version = "0.1.0"
+description = "Cross-sectional equity backtester: reproducible data, a reusable backtest engine, and research reports."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Nikita Singh", email = "nikitasingh01@yahoo.com" }]
+keywords = ["backtest", "quant", "equities", "cross-sectional"]
+
+dependencies = [
+    "pandas>=2.1,<3.0",
+    "numpy>=1.26,<3.0",
+    "pyarrow>=15.0",
+    "requests>=2.31",
+    "pydantic>=2.5,<3.0",
+    "PyYAML>=6.0",
+    "typer>=0.12",
+    "rich>=13.0",
+    "matplotlib>=3.8",
+    "Jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-requests",
+    "types-PyYAML",
+]
+
+[project.scripts]
+xsbt = "xsbt.cli:main"
+
+[project.urls]
+Repository = "https://github.com/nikitasingh01/xsbt"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xsbt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "network: test requires internet access (deselected by default in CI)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF", "PD", "NPY"]
+ignore = [
+    "B008",   # typer uses function calls in argument defaults by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/xsbt"]
+strict = true
+# pandas/matplotlib stubs are incomplete; typing every frame operation costs more than it pays.
+disallow_any_expr = false
+disallow_any_explicit = false
+
+[[tool.mypy.overrides]]
+module = ["matplotlib.*", "pandas.*", "pyarrow.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["src/xsbt"]
+branch = true

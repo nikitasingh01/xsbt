@@ -1,0 +1,7 @@
+# The container builds on Linux and the CI runners are Linux. Normalise to LF in the
+# repo and on checkout, so a CRLF working copy on Windows never reaches a shell script
+# or the Dockerfile.
+* text=auto eol=lf
+
+# Recorded API responses and parquet-adjacent fixtures stay byte-exact.
+tests/fixtures/*.json text eol=lf
