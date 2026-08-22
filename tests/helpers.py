@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import numpy as np
+import pandas as pd
+
 
 class FakeResponse:
     def __init__(self, status_code: int, payload: Any = None, text: str = "") -> None:
@@ -37,3 +40,19 @@ class FakeSession:
         if isinstance(item, Exception):
             raise item
         return item
+
+
+def make_bars(dates: pd.DatetimeIndex, closes: np.ndarray, volume: float = 1e7) -> pd.DataFrame:
+    """Bar frame in the shape a PriceSource returns."""
+    closes = np.asarray(closes, dtype="float64")
+    return pd.DataFrame(
+        {
+            "open": closes,
+            "high": closes,
+            "low": closes,
+            "close": closes,
+            "adj_close": closes,
+            "volume": np.full(len(closes), volume),
+        },
+        index=pd.DatetimeIndex(dates, name="date"),
+    )
