@@ -10,6 +10,7 @@ from xsbt.data.base import (
     to_panel,
 )
 from xsbt.data.cache import CacheEntry, Manifest, PriceCache
+from xsbt.data.universe import UniverseMember, load_universe
 from xsbt.data.yahoo import YahooFinanceSource, parse_chart_payload
 
 __all__ = [
@@ -22,7 +23,9 @@ __all__ = [
     "PriceCache",
     "PriceSource",
     "TickerNotFoundError",
+    "UniverseMember",
     "YahooFinanceSource",
+    "load_universe",
     "parse_chart_payload",
     "to_panel",
 ]

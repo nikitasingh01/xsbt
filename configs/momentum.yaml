@@ -1,0 +1,27 @@
+name: momentum_6m_skip1m
+description: >
+  Cross-sectional 6-month momentum, skipping the most recent month. Long the top
+  quintile, short the bottom, equal weighted and dollar neutral, rebalanced monthly.
+
+data:
+  universe: configs/universe_us_liquid.csv
+  start: 2010-01-01
+  end: 2026-08-01
+  cache_dir: data/cache
+  benchmark: SPY
+
+strategy:
+  name: momentum
+  # 126 sessions is roughly six months. Skipping the last 21 keeps short-term reversal
+  # out of the signal, which is the standard construction.
+  lookback_days: 126
+  skip_days: 21
+  top_fraction: 0.2
+  min_names: 10
+
+portfolio:
+  rebalance: M
+  # Signal is formed on the rebalance close; the book is not held until the next close.
+  execution_lag_days: 1
+  gross_leverage: 1.0
+  cost_bps: 10.0
