@@ -7,10 +7,14 @@ from xsbt.strategies.base import (
     build,
     register,
 )
+from xsbt.strategies.momentum import Momentum
+from xsbt.strategies.reversal import Reversal
 
 __all__ = [
     "REGISTRY",
     "CrossSectionalRankStrategy",
+    "Momentum",
+    "Reversal",
     "Strategy",
     "build",
     "register",
