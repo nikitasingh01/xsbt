@@ -137,6 +137,23 @@ memory, which is not this.
 **Rejected:** storing only adjusted close. It halves the file size and throws away the
 ability to ever reconstruct what the adjustment did.
 
+Two things about the client that only showed up against the live endpoint, both recorded
+because they cost me time:
+
+`requests.Session()` arrives with its own `User-Agent` header already set. So
+`headers.setdefault("User-Agent", browser_ua)` is a no-op, the request goes out as
+`python-requests/2.32.5`, and Yahoo returns 429 to every single call. The failure is well
+disguised: it looks exactly like being rate limited for going too fast, so the instinct is
+to slow down or add backoff, and neither does anything. It has to be plain assignment. The
+test for it uses a real `requests.Session`, because the `FakeSession` double starts with
+empty headers and hides the entire problem.
+
+The second is that a rate limit is a fact about the session, not about the symbol that
+tripped it. Retrying the failed request with backoff and then going back to full speed for
+the next symbol just walks into the same wall forty times. So a 429 doubles the inter-request
+interval for the rest of the run, up to a ceiling, and `Retry-After` is honoured when the
+server sends one.
+
 ---
 
 ## 6. Vectorised pandas, not an event loop

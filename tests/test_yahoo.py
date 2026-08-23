@@ -8,8 +8,21 @@ import pytest
 import requests
 
 from tests.helpers import FakeResponse, FakeSession
+from xsbt.data import yahoo
 from xsbt.data.base import PRICE_COLUMNS, FetchError, TickerNotFoundError
 from xsbt.data.yahoo import YahooFinanceSource, parse_chart_payload
+
+
+@pytest.fixture
+def slept(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Records what the retry path would have waited instead of waiting it.
+
+    Pair with ``min_interval=0.0`` so the inter-request throttle stays out of the list
+    and what is left is purely the backoff decision under test.
+    """
+    waits: list[float] = []
+    monkeypatch.setattr(yahoo.time, "sleep", waits.append)
+    return waits
 
 
 def test_parses_recorded_payload(aapl_payload: dict[str, Any]) -> None:
@@ -173,6 +186,94 @@ def test_gives_up_after_max_attempts(no_sleep: None) -> None:
         source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
 
     assert len(session.calls) == 4
+
+
+def test_the_browser_user_agent_replaces_the_library_default() -> None:
+    """Yahoo 429s a python-requests User-Agent on essentially every call.
+
+    Worth pinning because the failure is so well disguised: every symbol comes back 429,
+    which reads as being rate limited for going too fast, and no amount of backoff or
+    throttling fixes it. It has to be asserted against a real requests.Session, since a
+    test double starts with empty headers and hides the whole problem.
+    """
+    session = requests.Session()
+    assert "python-requests" in session.headers["User-Agent"], "the trap this test guards"
+
+    YahooFinanceSource(session=session)
+
+    assert session.headers["User-Agent"] == yahoo.DEFAULT_USER_AGENT
+
+
+def test_a_rate_limit_slows_the_rest_of_the_session(
+    aapl_payload: dict[str, Any], no_sleep: None
+) -> None:
+    """The limiter counts requests per session, so the next symbol hits the same wall.
+
+    Backing off only the failed request and then resuming at full speed is how one 429
+    becomes forty. The widened interval has to outlive the call that earned it.
+    """
+    session = FakeSession([FakeResponse(429), FakeResponse(200, aapl_payload)])
+    source = YahooFinanceSource(session=session, min_interval=0.25)  # type: ignore[arg-type]
+
+    source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
+
+    # Still widened after the retry succeeded: getting one call through does not mean
+    # the limit lifted.
+    assert source.interval == 0.5
+
+
+def test_the_slowdown_stops_at_the_ceiling(aapl_payload: dict[str, Any], no_sleep: None) -> None:
+    session = FakeSession([FakeResponse(429)] * 3 + [FakeResponse(200, aapl_payload)])
+    source = YahooFinanceSource(  # type: ignore[arg-type]
+        session=session, min_interval=0.25, max_interval=0.75, max_attempts=5
+    )
+
+    source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
+
+    # 0.25 -> 0.5 -> capped, rather than doubling to 2.0 on the third.
+    assert source.interval == 0.75
+
+
+def test_a_server_that_says_when_to_come_back_is_believed(
+    aapl_payload: dict[str, Any], slept: list[float]
+) -> None:
+    session = FakeSession(
+        [FakeResponse(429, headers={"Retry-After": "7"}), FakeResponse(200, aapl_payload)]
+    )
+    source = YahooFinanceSource(session=session, min_interval=0.0)  # type: ignore[arg-type]
+
+    source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
+
+    # 7 from the header, not the 0.5 our own backoff would have picked.
+    assert slept == [7.0]
+
+
+def test_an_absurd_retry_after_is_capped(no_sleep: None, slept: list[float]) -> None:
+    """An hour-long wait should fail the run, not park the process until it times out."""
+    session = FakeSession([FakeResponse(429, headers={"Retry-After": "3600"})] * 2)
+    source = YahooFinanceSource(  # type: ignore[arg-type]
+        session=session, min_interval=0.0, max_attempts=2
+    )
+
+    with pytest.raises(FetchError, match="giving up"):
+        source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
+
+    assert slept == [yahoo.MAX_BACKOFF_SECONDS]
+
+
+def test_a_dated_retry_after_falls_back_to_our_own_backoff(
+    aapl_payload: dict[str, Any], slept: list[float]
+) -> None:
+    """Retry-After also has an HTTP-date form, which we deliberately do not parse."""
+    header = {"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"}
+    session = FakeSession([FakeResponse(429, headers=header), FakeResponse(200, aapl_payload)])
+    source = YahooFinanceSource(  # type: ignore[arg-type]
+        session=session, min_interval=0.0, backoff_base=0.5
+    )
+
+    source.fetch("AAPL", dt.date(2023, 1, 1), dt.date(2023, 3, 31))
+
+    assert slept == [0.5]
 
 
 def test_non_json_response_raises(no_sleep: None) -> None:

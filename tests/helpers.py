@@ -13,10 +13,17 @@ from xsbt.data.cache import PriceCache
 
 
 class FakeResponse:
-    def __init__(self, status_code: int, payload: Any = None, text: str = "") -> None:
+    def __init__(
+        self,
+        status_code: int,
+        payload: Any = None,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text
+        self.headers = headers or {}
 
     @property
     def ok(self) -> bool:
