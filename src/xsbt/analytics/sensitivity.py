@@ -112,9 +112,10 @@ def parameter_grid(
     for lookback in lookbacks:
         for fraction in top_fractions:
             try:
-                # model_validate, not model_copy: copying skips the validators, and a cell
-                # whose lookback no longer clears skip_days would reach the strategy as a
-                # backwards window instead of being rejected here.
+                # The strategy block is rebuilt with model_validate rather than copied:
+                # model_copy skips the validators, so a cell whose lookback no longer
+                # clears skip_days would reach the strategy as a backwards window instead
+                # of being rejected here.
                 cell = config.model_copy(
                     update={
                         "strategy": StrategyConfig.model_validate(

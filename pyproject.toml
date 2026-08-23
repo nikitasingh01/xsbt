@@ -46,10 +46,8 @@ packages = ["src/xsbt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# --strict-markers so a typo in a mark is an error rather than a silently skipped filter.
 addopts = "-q --strict-markers"
-markers = [
-    "network: test requires internet access (deselected by default in CI)",
-]
 
 [tool.ruff]
 line-length = 100

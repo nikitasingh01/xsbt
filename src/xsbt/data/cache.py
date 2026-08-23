@@ -114,7 +114,8 @@ class PriceCache:
         self.manifest = Manifest.load(self.manifest_path)
 
     def path_for(self, ticker: str) -> Path:
-        # Class B shares and the like arrive as BRK-B; keep them filesystem-safe.
+        # Yahoo writes class B shares as BRK-B, but other vendors write BRK/B, and that
+        # would silently become a subdirectory. Normalise before it reaches the filesystem.
         return self.prices_dir / f"{ticker.replace('/', '_')}.parquet"
 
     def has(self, ticker: str) -> bool:
