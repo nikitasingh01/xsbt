@@ -32,6 +32,34 @@ touch the network.
 
 ---
 
+## What it actually says
+
+Both strategies over 2010-01-04 to 2026-07-31, 4169 sessions, 40 US large caps, monthly
+rebalance, long the top quintile and short the bottom, costed at 10bps per unit traded.
+
+| | Momentum 6m skip 1m | Reversal 1m |
+|---|---|---|
+| CAGR, net | 0.66% | -5.53% |
+| Volatility | 10.99% | 9.78% |
+| Sharpe, net | 0.12 | -0.53 |
+| Sharpe t-stat | 0.47 | -2.17 |
+| Max drawdown | -34.9% | -64.6% |
+| Turnover p.a. | 9.0x | 18.7x |
+| Breakeven cost | 17bps | none, it loses at zero cost |
+
+Neither is tradeable, and that is the honest answer rather than a disappointing one.
+Momentum is indistinguishable from zero over the sample, and its 17bps breakeven leaves
+no room over a realistic 10bps once size is involved. Reversal is significantly negative:
+at 18.7x turnover it pays 1.87% a year in costs, and it was losing before the costs were
+charged.
+
+A universe of 40 survivors gives an 8-long, 8-short book, which is thin enough that these
+should be read as a check that the machinery works rather than as an estimate of the
+effect. The report says all of this on its own front page, which is the part I actually
+care about here.
+
+---
+
 ## Architecture
 
 ```
