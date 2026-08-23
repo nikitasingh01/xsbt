@@ -1,0 +1,57 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: python -m ruff check src tests
+
+      - name: Format
+        run: python -m ruff format --check src tests
+
+      - name: Typecheck
+        run: python -m mypy
+
+      # Every test is offline: the Yahoo client runs against recorded JSON fixtures and
+      # everything else against seeded random walks. A green run here means nothing in
+      # the suite quietly depends on a vendor being up.
+      - name: Test
+        run: python -m pytest --cov --cov-report=term-missing
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t xsbt:ci .
+
+      - name: Smoke test the entrypoint
+        run: docker run --rm xsbt:ci --version
