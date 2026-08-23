@@ -237,6 +237,20 @@ as a single artifact next to the run that produced it.
 timestamp so that two runs off one snapshot diff clean. The wall clock lives in
 `metadata.json`.
 
+A number being arithmetically correct is not the same as it being worth printing. Reading
+the first real report, the leg attribution said the long book was **562%** of the P&L and
+the short book **-462%**. That is what you get when you divide a net of +2.2% by legs of
++12.2% and -10.0%, and it is exactly right, and it tells a reader nothing except that the
+report might be broken. A long/short book nets a small number out of two large offsetting
+ones almost by construction, so the split is now dropped once it leaves the range a reader
+can interpret, and the page says why instead of leaving a blank cell. The same reading pass
+caught "growth stops at roughly 0 bps" on reversal, which is true and useless: the book
+loses money with costs switched off, so no cost assumption was ever the problem.
+
+Both of those are the argument for the last line of the plan being "open the report and
+read it as a PM would". Neither is visible from the test suite, because both were working
+as designed.
+
 **Rejected:** a notebook. Notebooks are excellent for the exploration and bad as a
 deliverable: they carry an execution environment, they diff badly, and the output depends
 on what order somebody ran the cells in.

@@ -18,6 +18,11 @@ from xsbt.analytics.metrics import (
     sharpe_ratio,
 )
 
+#: A leg's share of P&L is worth printing while it stays inside this range. A share above
+#: 1 is meaningful and common: it says the other leg lost money. Past 2, the two legs are
+#: mostly cancelling and the ratio has stopped describing the book.
+SHARE_RANGE = (-1.0, 2.0)
+
 
 @dataclass(frozen=True)
 class LegAttribution:
@@ -35,9 +40,15 @@ class LegAttribution:
     short_sharpe: float
     long_hit_rate: float
     short_hit_rate: float
-    #: Long P&L over total P&L. Outside [0, 1] when one leg lost money.
+    #: Long P&L over total P&L. Outside [0, 1] when one leg lost money, and NaN when the
+    #: legs offset so heavily that the ratio stops carrying information.
     long_share_of_pnl: float
     correlation: float
+
+    @property
+    def legs_offset(self) -> bool:
+        """True when the share of P&L was suppressed because the legs nearly cancel."""
+        return math.isnan(self.long_share_of_pnl)
 
     def as_dict(self) -> dict[str, Any]:
         return _json_safe(asdict(self))
@@ -60,7 +71,16 @@ def attribute_legs(legs: pd.DataFrame) -> LegAttribution:
     long_total = float(long_leg.sum())
     short_total = float(short_leg.sum())
     combined = long_total + short_total
+
+    # A long/short book routinely nets a small number out of two large offsetting ones,
+    # and dividing by that remainder gives shares like 562% and -462%: arithmetically
+    # right, unreadable, and the first thing a PM will call a bug. Outside the readable
+    # range the split is dropped, and the report says why. NaN fails the comparison, so
+    # a book that made exactly nothing falls through here too.
     share = long_total / combined if combined != 0.0 else float("nan")
+    low, high = SHARE_RANGE
+    if not low <= share <= high:
+        share = float("nan")
 
     return LegAttribution(
         long_ann_return=float(long_leg.mean() * TRADING_DAYS),

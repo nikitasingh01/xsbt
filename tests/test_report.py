@@ -246,6 +246,30 @@ def test_a_reader_never_sees_a_raw_nan_or_inf(report: ReportData) -> None:
     assert not re.search(r"\binf\b", prose)
 
 
+def test_the_cost_section_explains_a_breakeven_of_zero(report: ReportData) -> None:
+    """A book that loses money at zero cost has a breakeven of 0, which is correct.
+
+    Printing "growth stops at roughly 0 bps" around it is not: the reader is left
+    thinking the cost assumption is the problem, when nothing about the costs would
+    change the answer. Reversal hits this on the real data.
+    """
+    doomed = dataclasses.replace(report, breakeven_bps=0.0)
+
+    prose = re.sub(r"<[^>]+>", " ", render(doomed))
+
+    assert "no cost level that rescues this" in prose
+    assert "growth stops" not in prose.lower()
+
+
+def test_the_cost_section_copes_with_a_book_that_never_traded(report: ReportData) -> None:
+    """Zero turnover leaves nothing to solve the breakeven against."""
+    idle = dataclasses.replace(report, breakeven_bps=float("nan"))
+
+    prose = re.sub(r"<[^>]+>", " ", render(idle))
+
+    assert "no cost level to solve for" in prose
+
+
 def test_metrics_json_holds_no_invalid_literals(report: ReportData, tmp_path: Path) -> None:
     """NaN and Infinity are Python's, not JSON's. Anything reading this file will choke."""
     path = write_metrics(report, tmp_path / "metrics.json")

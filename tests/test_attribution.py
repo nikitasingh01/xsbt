@@ -51,6 +51,36 @@ def test_share_is_undefined_when_the_book_made_nothing() -> None:
     legs = attribute_legs(legs_frame([0.01, -0.01], [0.02, -0.02]))
 
     assert math.isnan(legs.long_share_of_pnl)
+    assert legs.legs_offset
+
+
+def test_shares_are_suppressed_when_the_legs_nearly_cancel() -> None:
+    """The real momentum run nets +2.2% out of +12.2% long and -10.0% short.
+
+    Dividing through gives 562% and -462%, which is arithmetically correct and reads as
+    a broken report. Outside the readable range the split is dropped instead.
+    """
+    legs = attribute_legs(legs_frame([0.07, 0.05], [-0.04, -0.06]))
+
+    assert math.isnan(legs.long_share_of_pnl)
+    assert legs.legs_offset
+    # The contribution row is the one that still answers the question.
+    assert legs.long_ann_return > 0.0 > legs.short_ann_return
+
+
+def test_shares_are_suppressed_when_a_losing_book_cancels_too() -> None:
+    """Same failure on the other side: reversal loses money and printed -268% / +368%."""
+    legs = attribute_legs(legs_frame([0.07, 0.05], [-0.10, -0.06]))
+
+    assert legs.legs_offset
+
+
+def test_shares_survive_when_both_legs_pull_the_same_way() -> None:
+    """The case the row exists for: nothing cancels, so the split means something."""
+    legs = attribute_legs(legs_frame([0.04, 0.02], [0.015, 0.005]))
+
+    assert legs.long_share_of_pnl == pytest.approx(0.75)
+    assert not legs.legs_offset
 
 
 def test_opposed_legs_are_perfectly_anticorrelated() -> None:

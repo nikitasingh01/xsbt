@@ -206,7 +206,14 @@
       </tbody>
     </table>
     <p class="note">
+      {%- if breakeven == 0 %}
+      There is no cost level that rescues this: it loses money with costs switched off
+      entirely, so the trading assumptions are not what is wrong with it.
+      {%- elif breakeven != breakeven %}{# only NaN is unequal to itself #}
+      Nothing traded over the sample, so there is no cost level to solve for.
+      {%- else %}
       Growth stops at roughly <strong>{{ breakeven | num(0) }} bps</strong> per unit traded.
+      {%- endif %}
       The run assumes {{ config.portfolio.cost_bps | num(1) }} bps and burns
       {{ net.ann_cost_drag | pct }} a year in costs on {{ net.ann_turnover | num(1) }}x
       annual turnover ({{ net.avg_turnover_per_trade | num(2) }}x per rebalance).
@@ -235,7 +242,11 @@
         <tr><td>Share of total P&amp;L</td><td class="num">{{ legs.long_share_of_pnl | pct(1) }}</td><td class="num">{{ (1 - legs.long_share_of_pnl) | pct(1) }}</td></tr>
       </tbody>
     </table>
-    <p class="note">Correlation between the two legs: {{ legs.correlation | num }}.</p>
+    <p class="note">Correlation between the two legs: {{ legs.correlation | num }}.
+      {%- if legs.legs_offset %} The two legs very nearly cancel, so their shares of net
+      P&amp;L are left out: dividing a small net by two large offsetting halves gives
+      numbers in the hundreds of percent that describe the arithmetic rather than the
+      book. Read the contribution row instead.{% endif %}</p>
   </div>
   <div>
     <figure><img src="{{ figures.legs }}" alt="Cumulative contribution by leg"></figure>
