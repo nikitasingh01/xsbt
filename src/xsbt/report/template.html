@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ config.name }} &middot; xsbt backtest report</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --muted: #6b6b6b;
+    --line: #e2e2e2;
+    --accent: #1f4e79;
+    --panel: #f7f8fa;
+    --good: #2e8b57;
+    --bad: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    padding: 32px 24px 64px;
+    max-width: 1080px;
+    font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: #fff;
+  }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 {
+    font-size: 16px;
+    margin: 40px 0 4px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--accent);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+  }
+  h3 { font-size: 13px; margin: 20px 0 6px; color: var(--muted); text-transform: uppercase; }
+  p { margin: 8px 0; }
+  a { color: var(--accent); }
+  .subtitle { color: var(--muted); margin: 0 0 2px; }
+  .note { color: var(--muted); font-size: 13px; }
+
+  .verdict {
+    margin: 20px 0 4px;
+    padding: 14px 18px;
+    background: var(--panel);
+    border-left: 4px solid var(--accent);
+  }
+
+  .cards { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 4px; }
+  .card {
+    flex: 1 1 150px;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+  }
+  .card .label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .card .value { font-size: 22px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 14px; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  thead th { font-size: 12px; color: var(--muted); text-transform: uppercase; }
+  tbody tr:hover { background: var(--panel); }
+  td.num, th.num { font-variant-numeric: tabular-nums; }
+  .pos { color: var(--good); }
+  .neg { color: var(--bad); }
+
+  .grid2 { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+  .grid2 > * { flex: 1 1 320px; min-width: 300px; }
+
+  figure { margin: 14px 0; }
+  figure img { width: 100%; height: auto; display: block; }
+
+  dl.kv { margin: 8px 0; font-size: 13px; }
+  dl.kv div { display: flex; justify-content: space-between; border-bottom: 1px solid var(--line); padding: 4px 0; }
+  dl.kv dt { color: var(--muted); margin: 0; }
+  dl.kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+
+  .caveats li { margin-bottom: 8px; }
+  code { background: var(--panel); padding: 1px 5px; font-size: 13px; }
+  footer { margin-top: 48px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  @media print { body { max-width: none; } h2 { page-break-after: avoid; } figure { page-break-inside: avoid; } }
+</style>
+</head>
+<body>
+
+<h1>{{ config.name }}</h1>
+<p class="subtitle">{{ config.description or "Cross-sectional long/short equity backtest." }}</p>
+<p class="note">
+  {{ net.start }} to {{ net.end }} &middot; {{ net.sessions }} sessions &middot;
+  {{ meta.universe_size }} names &middot; rebalanced {{ config.portfolio.rebalance }} with a
+  {{ config.portfolio.execution_lag_days }}-session execution lag &middot;
+  costed at {{ config.portfolio.cost_bps | num(1) }}bps
+</p>
+
+<div class="verdict">{{ verdict }}</div>
+
+<div class="cards">
+  <div class="card"><div class="label">CAGR, net</div><div class="value">{{ net.cagr | pct }}</div></div>
+  <div class="card"><div class="label">Sharpe, net</div><div class="value">{{ net.sharpe | num }}</div></div>
+  <div class="card"><div class="label">Sharpe t-stat</div><div class="value">{{ net.sharpe_tstat | num }}</div></div>
+  <div class="card"><div class="label">Max drawdown</div><div class="value">{{ net.max_drawdown | pct(1) }}</div></div>
+  <div class="card"><div class="label">Turnover p.a.</div><div class="value">{{ net.ann_turnover | num(1) }}x</div></div>
+  <div class="card"><div class="label">Breakeven cost</div><div class="value">{{ breakeven | num(0) }}<span style="font-size:13px">bps</span></div></div>
+</div>
+
+<h2>Performance</h2>
+<figure><img src="{{ figures.equity }}" alt="Cumulative growth of 1"></figure>
+<figure><img src="{{ figures.drawdown }}" alt="Drawdown from previous high"></figure>
+
+<div class="grid2">
+  <div>
+    <h3>Return</h3>
+    <dl class="kv">
+      <div><dt>Total return</dt><dd>{{ net.total_return | pct }}</dd></div>
+      <div><dt>CAGR</dt><dd>{{ net.cagr | pct }}</dd></div>
+      <div><dt>CAGR before costs</dt><dd>{{ gross.cagr | pct }}</dd></div>
+      <div><dt>Best day</dt><dd>{{ net.best_day | pct }}</dd></div>
+      <div><dt>Worst day</dt><dd>{{ net.worst_day | pct }}</dd></div>
+      <div><dt>Best month</dt><dd>{{ net.best_month | pct }}</dd></div>
+      <div><dt>Worst month</dt><dd>{{ net.worst_month | pct }}</dd></div>
+    </dl>
+  </div>
+  <div>
+    <h3>Risk</h3>
+    <dl class="kv">
+      <div><dt>Volatility p.a.</dt><dd>{{ net.ann_volatility | pct }}</dd></div>
+      <div><dt>Sharpe (SE {{ net.sharpe_se | num }})</dt><dd>{{ net.sharpe | num }}</dd></div>
+      <div><dt>Sortino</dt><dd>{{ net.sortino | num }}</dd></div>
+      <div><dt>Calmar</dt><dd>{{ net.calmar | num }}</dd></div>
+      <div><dt>Daily VaR 95%</dt><dd>{{ net.var_95 | pct }}</dd></div>
+      <div><dt>Daily CVaR 95%</dt><dd>{{ net.cvar_95 | pct }}</dd></div>
+      <div><dt>Skew / excess kurtosis</dt><dd>{{ net.skew | num }} / {{ net.excess_kurtosis | num }}</dd></div>
+    </dl>
+  </div>
+  <div>
+    <h3>Drawdown and trading</h3>
+    <dl class="kv">
+      <div><dt>Max drawdown</dt><dd>{{ net.max_drawdown | pct }}</dd></div>
+      <div><dt>Peak to trough</dt><dd>{{ net.max_drawdown_peak or "n/a" }} &rarr; {{ net.max_drawdown_trough or "n/a" }}</dd></div>
+      <div><dt>Recovered</dt><dd>{{ net.max_drawdown_recovered or "not yet" }}</dd></div>
+      <div><dt>Time underwater</dt><dd>{{ net.time_underwater | pct(1) }}</dd></div>
+      <div><dt>Hit rate, daily</dt><dd>{{ net.hit_rate_daily | pct(1) }}</dd></div>
+      <div><dt>Hit rate, monthly</dt><dd>{{ net.hit_rate_monthly | pct(1) }}</dd></div>
+      <div><dt>Rebalances traded</dt><dd>{{ net.trades }} of {{ meta.rebalances_scheduled }}</dd></div>
+    </dl>
+  </div>
+</div>
+
+<h2>Through time</h2>
+<p class="note">
+  One good year inside a flat decade is not an edge. These are the same net returns cut by
+  calendar year and by trailing window.
+</p>
+<figure><img src="{{ figures.yearly }}" alt="Return by calendar year"></figure>
+<figure><img src="{{ figures.rolling_sharpe }}" alt="Rolling 252-session Sharpe"></figure>
+
+<div class="grid2">
+  <div>
+    <table>
+      <thead>
+        <tr><th>Year</th><th class="num">Strategy</th>{% if has_benchmark %}<th class="num">Benchmark</th>{% endif %}</tr>
+      </thead>
+      <tbody>
+      {% for row in yearly %}
+        <tr>
+          <td>{{ row.year }}</td>
+          <td class="num {{ 'pos' if row.strategy and row.strategy > 0 else 'neg' }}">{{ row.strategy | signed }}</td>
+          {% if has_benchmark %}<td class="num">{{ row.benchmark | signed }}</td>{% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <figure><img src="{{ figures.monthly }}" alt="Monthly return distribution"></figure>
+  </div>
+</div>
+
+<h2>Cost sensitivity</h2>
+<p class="note">
+  Cost is charged on notional traded, so it scales with turnover rather than with capital.
+  Repricing the same weight path at a different rate is exact, not an approximation: the
+  weights never depend on the costs they incurred.
+</p>
+<div class="grid2">
+  <div>
+    <table>
+      <thead>
+        <tr><th>Cost, bps</th><th class="num">CAGR</th><th class="num">Sharpe</th><th class="num">t-stat</th><th class="num">Max DD</th></tr>
+      </thead>
+      <tbody>
+      {% for row in costs %}
+        <tr>
+          <td>{{ row.cost_bps | num(1) }}{% if row.cost_bps == config.portfolio.cost_bps %} &larr; as run{% endif %}</td>
+          <td class="num">{{ row.cagr | pct }}</td>
+          <td class="num">{{ row.sharpe | num }}</td>
+          <td class="num">{{ row.sharpe_tstat | num }}</td>
+          <td class="num">{{ row.max_drawdown | pct(1) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="note">
+      Growth stops at roughly <strong>{{ breakeven | num(0) }} bps</strong> per unit traded.
+      The run assumes {{ config.portfolio.cost_bps | num(1) }} bps and burns
+      {{ net.ann_cost_drag | pct }} a year in costs on {{ net.ann_turnover | num(1) }}x
+      annual turnover ({{ net.avg_turnover_per_trade | num(2) }}x per rebalance).
+    </p>
+  </div>
+  <div>
+    <figure><img src="{{ figures.cost }}" alt="Sharpe against assumed cost"></figure>
+  </div>
+</div>
+
+<h2>Where the P&amp;L comes from</h2>
+<p class="note">
+  Contributions to the same portfolio return, before costs. An edge that lives entirely in
+  the short book is a different proposition, because shorts carry borrow and are the first
+  thing to become uncoverable.
+</p>
+<div class="grid2">
+  <div>
+    <table>
+      <thead><tr><th></th><th class="num">Long book</th><th class="num">Short book</th></tr></thead>
+      <tbody>
+        <tr><td>Contribution p.a.</td><td class="num">{{ legs.long_ann_return | pct }}</td><td class="num">{{ legs.short_ann_return | pct }}</td></tr>
+        <tr><td>Volatility p.a.</td><td class="num">{{ legs.long_ann_volatility | pct }}</td><td class="num">{{ legs.short_ann_volatility | pct }}</td></tr>
+        <tr><td>Sharpe</td><td class="num">{{ legs.long_sharpe | num }}</td><td class="num">{{ legs.short_sharpe | num }}</td></tr>
+        <tr><td>Hit rate</td><td class="num">{{ legs.long_hit_rate | pct(1) }}</td><td class="num">{{ legs.short_hit_rate | pct(1) }}</td></tr>
+        <tr><td>Share of total P&amp;L</td><td class="num">{{ legs.long_share_of_pnl | pct(1) }}</td><td class="num">{{ (1 - legs.long_share_of_pnl) | pct(1) }}</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Correlation between the two legs: {{ legs.correlation | num }}.</p>
+  </div>
+  <div>
+    <figure><img src="{{ figures.legs }}" alt="Cumulative contribution by leg"></figure>
+  </div>
+</div>
+
+<h2>Market exposure</h2>
+{% if market %}
+<p class="note">
+  Ordinary least squares of the net daily return on the benchmark, both over cash. A
+  dollar-neutral book should come out near zero beta; if it does not, part of the Sharpe is
+  a market call rather than a stock-selection one.
+</p>
+<div class="grid2">
+  <div>
+    <dl class="kv">
+      <div><dt>Beta to {{ config.data.benchmark }}</dt><dd>{{ market.beta | num }}</dd></div>
+      <div><dt>Alpha p.a.</dt><dd>{{ market.alpha | pct }}</dd></div>
+      <div><dt>Tracking error p.a.</dt><dd>{{ market.tracking_error | pct }}</dd></div>
+      <div><dt>Residual Sharpe</dt><dd>{{ market.residual_sharpe | num }}</dd></div>
+      <div><dt>R squared</dt><dd>{{ market.r_squared | num(3) }}</dd></div>
+      <div><dt>Overlapping sessions</dt><dd>{{ market.observations }}</dd></div>
+    </dl>
+  </div>
+  <div>
+    <figure><img src="{{ figures.exposures }}" alt="Gross and net exposure over time"></figure>
+  </div>
+</div>
+{% else %}
+<p class="note">No benchmark was available for this run, so beta and alpha are not reported.</p>
+<figure><img src="{{ figures.exposures }}" alt="Gross and net exposure over time"></figure>
+{% endif %}
+
+<h2>Parameter sensitivity</h2>
+{% if figures.grid %}
+<p class="note">
+  Net Sharpe with everything else held fixed. A single good cell surrounded by bad ones is a
+  fitted parameter, not a signal. The configured setting is
+  {{ config.strategy.lookback_days }} sessions at {{ config.strategy.top_fraction }}.
+</p>
+<figure style="max-width: 560px"><img src="{{ figures.grid }}" alt="Sharpe across the parameter grid"></figure>
+{% else %}
+<p class="note">
+  Skipped: regenerating this section needs the price panel, which was not available. Re-run
+  <code>xsbt report</code> against a populated cache to include it.
+</p>
+{% endif %}
+
+<h2>Assumptions and caveats</h2>
+<ul class="caveats">
+{% for heading, text in caveats %}
+  <li><strong>{{ heading }}.</strong> {{ text }}</li>
+{% endfor %}
+</ul>
+
+<h2>Provenance</h2>
+<dl class="kv">
+  <div><dt>Config fingerprint</dt><dd><code>{{ meta.get("config_fingerprint", "not recorded")[:16] }}</code></dd></div>
+  <div><dt>Data snapshot</dt><dd><code>{{ meta.data_snapshot_id[:16] if meta.data_snapshot_id else "not recorded" }}</code></dd></div>
+  <div><dt>Code commit</dt><dd><code>{{ meta.git_commit[:12] if meta.git_commit else "not a git checkout" }}</code></dd></div>
+  <div><dt>xsbt version</dt><dd>{{ meta.get("xsbt_version", version) }}</dd></div>
+  <div><dt>Strategy class</dt><dd>{{ meta.get("strategy", config.strategy.name) }}</dd></div>
+  <div><dt>Rebalances</dt><dd>{{ meta.get("rebalances_traded", "?") }} traded, {{ meta.get("rebalances_skipped", "?") }} skipped</dd></div>
+  <div><dt>Generated</dt><dd>{{ meta.get("run_utc", "not recorded") }}</dd></div>
+</dl>
+
+<footer>
+  Generated by xsbt {{ version }}. Same config fingerprint plus same data snapshot means the
+  same numbers; if either moves, so can the report.
+</footer>
+
+</body>
+</html>

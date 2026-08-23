@@ -3,6 +3,8 @@
 One verb per stage, so the artifacts are inspectable in between:
 
     xsbt fetch  --config configs/momentum.yaml
+    xsbt run    --config configs/momentum.yaml --out runs/momentum
+    xsbt report --run runs/momentum --out reports/momentum.html
     xsbt verify --cache-dir data/cache
 """
 
@@ -18,12 +20,16 @@ from typing import Annotated
 import typer
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.table import Table
 
 from xsbt import __version__
 from xsbt.config import BacktestConfig, DataConfig
 from xsbt.data.base import DataError
 from xsbt.data.cache import PriceCache
-from xsbt.data.market import load_market_data, open_repository
+from xsbt.data.market import MarketData, load_market_data, open_repository
+from xsbt.engine.backtest import BacktestResult, run_backtest
+from xsbt.report.html import ReportData, analyse, write_html, write_metrics, write_returns
+from xsbt.strategies import build
 
 app = typer.Typer(
     add_completion=False,
@@ -31,6 +37,10 @@ app = typer.Typer(
     help="Cross-sectional long/short equity backtester.",
 )
 console = Console()
+
+REPORT_FILE = "report.html"
+METRICS_FILE = "metrics.json"
+RETURNS_FILE = "returns.csv"
 
 
 def _show_version(shown: bool) -> None:
@@ -103,6 +113,89 @@ def fetch(
 
 
 @app.command()
+def run(
+    config: Annotated[Path, typer.Option("--config", "-c", help="Run config YAML.")],
+    out: Annotated[
+        Path | None, typer.Option(help="Run directory. Defaults to runs/<config name>.")
+    ] = None,
+    offline: Annotated[
+        bool, typer.Option(help="Never touch the network; replay the cached snapshot.")
+    ] = False,
+    refresh: Annotated[bool, typer.Option(help="Refetch prices before running.")] = False,
+    report: Annotated[
+        bool, typer.Option("--report/--no-report", help="Also write report.html.")
+    ] = True,
+    grid: Annotated[
+        bool,
+        typer.Option(
+            "--grid/--no-grid",
+            help="Include the parameter sweep, which re-runs the backtest a few dozen times.",
+        ),
+    ] = True,
+) -> None:
+    """Run a backtest and write the run directory, metrics and report."""
+    with friendly_errors():
+        settings = BacktestConfig.from_yaml(config)
+        repository = open_repository(settings.data, offline=offline)
+        market = load_market_data(settings.data, repository, refresh=refresh)
+
+        result = run_backtest(
+            market.prices,
+            build(settings.strategy),
+            settings,
+            dollar_volume=market.dollar_volume,
+            benchmark=market.benchmark,
+            snapshot_id=market.snapshot_id,
+        )
+
+        directory = out or Path("runs") / settings.name
+        result.save(directory)
+        data = _write_artifacts(result, directory, market=market, grid=grid, report=report)
+
+        _print_summary(data)
+        console.print(f"\nwritten to {directory}")
+
+
+@app.command()
+def report(
+    run_dir: Annotated[Path, typer.Option("--run", help="Run directory written by `xsbt run`.")],
+    out: Annotated[
+        Path | None, typer.Option(help="HTML path. Defaults to <run>/report.html.")
+    ] = None,
+    grid: Annotated[
+        bool, typer.Option("--grid/--no-grid", help="Include the parameter sweep.")
+    ] = True,
+) -> None:
+    """Rebuild the report from a saved run, without re-running the backtest.
+
+    Prices are re-read from the cache offline, because a report on a past run has no
+    business fetching anything new. If the cache has moved on, the parameter sweep is
+    dropped and the rest of the page is still produced.
+    """
+    with friendly_errors():
+        result = BacktestResult.load(run_dir)
+
+        market = None
+        if grid:
+            try:
+                repository = open_repository(result.config.data, offline=True)
+                market = load_market_data(result.config.data, repository)
+            except (DataError, FileNotFoundError) as exc:
+                console.print(f"[yellow]note[/] parameter sweep skipped: {exc}")
+
+        data = analyse(
+            result,
+            prices=market.prices if market else None,
+            dollar_volume=market.dollar_volume if market else None,
+        )
+        target = write_html(data, out or run_dir / REPORT_FILE)
+        write_metrics(data, run_dir / METRICS_FILE)
+
+        _print_summary(data)
+        console.print(f"\nwritten to {target}")
+
+
+@app.command()
 def verify(
     cache_dir: Annotated[Path, typer.Option(help="Snapshot directory.")] = Path("data/cache"),
 ) -> None:
@@ -172,6 +265,47 @@ def _iso_date(value: str, flag: str) -> dt.date:
         return dt.date.fromisoformat(value)
     except ValueError:
         raise ValueError(f"{flag} must be an ISO date such as 2010-01-01, got {value!r}") from None
+
+
+def _write_artifacts(
+    result: BacktestResult,
+    directory: Path,
+    *,
+    market: MarketData,
+    grid: bool,
+    report: bool,
+) -> ReportData:
+    data = analyse(
+        result,
+        prices=market.prices if grid else None,
+        dollar_volume=market.dollar_volume,
+    )
+    write_metrics(data, directory / METRICS_FILE)
+    write_returns(result, directory / RETURNS_FILE)
+    if report:
+        write_html(data, directory / REPORT_FILE)
+    return data
+
+
+def _print_summary(data: ReportData) -> None:
+    net = data.net
+    table = Table(show_header=False, box=None, pad_edge=False)
+    table.add_column(style="dim")
+    table.add_column(justify="right")
+
+    rows = (
+        ("period", f"{net.start} to {net.end} ({net.years:.1f}y)"),
+        ("CAGR, net", f"{net.cagr:.2%}"),
+        ("volatility", f"{net.ann_volatility:.2%}"),
+        ("Sharpe, net", f"{net.sharpe:.2f} (t = {net.sharpe_tstat:.2f})"),
+        ("max drawdown", f"{net.max_drawdown:.2%}"),
+        ("turnover p.a.", f"{net.ann_turnover:.2f}x over {net.trades} rebalances"),
+        ("cost drag p.a.", f"{net.ann_cost_drag:.2%}"),
+        ("breakeven cost", f"{data.breakeven_bps:.0f}bps"),
+    )
+    for label, value in rows:
+        table.add_row(label, value)
+    console.print(table)
 
 
 def main() -> None:
