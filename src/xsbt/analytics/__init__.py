@@ -1,0 +1,58 @@
+"""Performance measurement. Nothing here knows how a return series was produced."""
+
+from xsbt.analytics.attribution import LegAttribution, MarketFit, attribute_legs, fit_market
+from xsbt.analytics.metrics import (
+    Drawdown,
+    PerformanceSummary,
+    annualised_volatility,
+    cagr,
+    calmar_ratio,
+    conditional_value_at_risk,
+    equity_curve,
+    hit_rate,
+    max_drawdown,
+    monthly_returns,
+    rolling_sharpe,
+    sharpe_ratio,
+    sharpe_standard_error,
+    sharpe_tstat,
+    sortino_ratio,
+    summarise,
+    value_at_risk,
+    yearly_returns,
+)
+from xsbt.analytics.sensitivity import (
+    breakeven_cost_bps,
+    cost_sweep,
+    net_returns_at,
+    parameter_grid,
+)
+
+__all__ = [
+    "Drawdown",
+    "LegAttribution",
+    "MarketFit",
+    "PerformanceSummary",
+    "annualised_volatility",
+    "attribute_legs",
+    "breakeven_cost_bps",
+    "cagr",
+    "calmar_ratio",
+    "conditional_value_at_risk",
+    "cost_sweep",
+    "equity_curve",
+    "fit_market",
+    "hit_rate",
+    "max_drawdown",
+    "monthly_returns",
+    "net_returns_at",
+    "parameter_grid",
+    "rolling_sharpe",
+    "sharpe_ratio",
+    "sharpe_standard_error",
+    "sharpe_tstat",
+    "sortino_ratio",
+    "summarise",
+    "value_at_risk",
+    "yearly_returns",
+]
