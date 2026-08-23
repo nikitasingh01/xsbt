@@ -8,6 +8,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from xsbt.config import BacktestConfig, DataConfig, PortfolioConfig, StrategyConfig
 from xsbt.data.cache import PriceCache
 
 
@@ -76,6 +77,36 @@ def make_bars(dates: pd.DatetimeIndex, closes: np.ndarray, volume: float = 1e7) 
             "volume": np.full(len(closes), volume),
         },
         index=pd.DatetimeIndex(dates, name="date"),
+    )
+
+
+def random_walk_panel(
+    names: int = 8, sessions: int = 520, seed: int = 20240117, start: str = "2018-01-01"
+) -> pd.DataFrame:
+    """A seeded lognormal walk, for tests that need a plausible panel rather than a toy."""
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range(start, periods=sessions, name="date")
+    steps = rng.normal(0.0004, 0.012, size=(sessions, names))
+    return pd.DataFrame(
+        100.0 * np.exp(steps.cumsum(axis=0)),
+        index=dates,
+        columns=[f"T{i:02d}" for i in range(names)],
+    )
+
+
+def make_backtest_config(panel: pd.DataFrame, **portfolio: Any) -> BacktestConfig:
+    """A runnable config pinned to whatever window ``panel`` covers."""
+    return BacktestConfig(
+        name="unit_test",
+        data=DataConfig(
+            universe=Path("configs/universe_us_liquid.csv"),
+            start=panel.index[0].date(),
+            end=panel.index[-1].date(),
+        ),
+        strategy=StrategyConfig(
+            name="momentum", lookback_days=60, skip_days=0, top_fraction=0.25, min_names=4
+        ),
+        portfolio=PortfolioConfig.model_validate(portfolio),
     )
 
 
