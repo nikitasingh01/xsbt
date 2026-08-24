@@ -113,12 +113,11 @@ reproducible, and it fails quietly rather than loudly. So:
 * `snapshot_id` is a SHA-256 over the whole manifest, and every run embeds it,
 * `--offline` forbids the network and replays from the cache. Tests and CI are offline only.
 
-Two runs against the same cache produce byte-identical `metrics.json`, asserted once at the
-library level and once end to end through the CLI. What makes that hold: the resolved
-config hashes to a `config_fingerprint`, the snapshot hashes to a `snapshot_id`, both land
-in `metadata.json` and in the report, the wall clock is kept out of `metrics.json`, and
-`returns.csv` uses fixed float formatting. If the fingerprint and snapshot both match, the
-numbers match. If either moves, you can see which one it was.
+Two runs against the same cache produce byte-identical `metrics.json`, asserted at the
+library level and again end to end through the CLI. The resolved config hashes to a
+`config_fingerprint` and the snapshot to a `snapshot_id`, both go into `metadata.json` and
+into the report, and the wall clock is kept out of `metrics.json`. Same fingerprint plus
+same snapshot means the same numbers; if either moves, you can see which one it was.
 
 `xsbt verify` re-hashes every file against the manifest and exits non-zero on drift, so it
 can go in a scheduled job.
@@ -316,21 +315,14 @@ docs/               DESIGN.md, ASSUMPTIONS.md
 
 ## Scope
 
-This is a focused slice, not a platform. What it deliberately does not do, and why, is in
-[`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). The short version:
+A focused slice, not a platform. The biggest gap by a distance is survivorship: the
+universe is 40 names that are liquid **today**, so nothing delisted or acquired since 2010
+is in it. After that, borrow cost is not charged, there is no capacity model so the cost
+sweep understates size, execution is at the close with no slippage, the parameter grid is a
+robustness check rather than a selection procedure, and corporate actions are whatever
+Yahoo's adjustment says they are.
 
-* the universe is a fixed list of names that are liquid **today**, so it is survivorship
-  biased, and that is the single largest bias in the numbers,
-* borrow cost and short financing are not modelled,
-* there is no market impact or capacity model, so the cost sweep is linear in turnover and
-  understates the cost of size,
-* execution is at the close with no slippage between decision and fill,
-* no walk-forward fitting, so the parameter grid is a robustness check and not a selection
-  procedure,
-* corporate actions are whatever Yahoo's adjusted close says they are.
-
-All of these are repeated in the report footer, because a report that hides its assumptions
-is worse than no report.
-
-The decisions behind the design, and the alternatives I rejected, are in
+All of it is written up in [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) and repeated in the
+report footer, because a report that hides its assumptions is worse than no report. The
+design decisions, and the alternatives I turned down, are in
 [`docs/DESIGN.md`](docs/DESIGN.md).
