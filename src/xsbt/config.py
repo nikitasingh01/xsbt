@@ -64,10 +64,9 @@ class StrategyConfig(Frozen):
 class PortfolioConfig(Frozen):
     #: 'M' month end, 'W' week end, 'Q' quarter end, or 'nD' every n sessions.
     rebalance: str = "M"
-    #: Sessions between the close that produces a signal and the close we trade on. A book
-    #: put on at the close of day d earns from d+1, so lag 1 means a signal from close t is
-    #: traded at close t+1 and earns from t+2. Lag 0 is the market-on-close convention and
-    #: assumes you can compute the signal and get the order in before the same bell.
+    #: Sessions between the close that produces a signal and the close we trade on. Lag 1
+    #: means a signal from close t is traded at close t+1 and earns from t+2. Lag 0 is the
+    #: market-on-close convention, which assumes the order is in before the same bell.
     execution_lag_days: int = Field(default=1, ge=0)
     #: Sum of absolute weights. 1.0 = 0.5 long, 0.5 short.
     gross_leverage: float = Field(default=1.0, gt=0.0)

@@ -1,19 +1,22 @@
 # xsbt
 
 A cross-sectional equity backtester. It fetches prices reproducibly, runs long/short
-rank-based strategies over history, and produces a report that answers the only question
-worth asking of a new strategy: **is this edge real, and can it be traded after costs?**
+rank-based strategies over history, and writes a report that answers the question a PM
+actually asks: **is this edge real, and can it be traded after costs?**
 
-Two strategies ship with it, cross-sectional momentum and short-term reversal, but the
-point of the repo is the machinery underneath. Adding the third strategy is one file and
-one method.
+Momentum and reversal both ship with it, but the point of the repo is the machinery
+underneath. Adding a third strategy is one file and one method.
 
 ```bash
-make setup                                   # editable install + dev deps
-make test                                    # full suite, offline, no network
-make demo                                    # fetch, run both strategies, build both reports
+make setup                 # editable install and dev deps
+make test                  # full suite, offline
+make demo                  # fetch, run both strategies, build both reports
 open runs/momentum/report.html
 ```
+
+Python 3.11 or newer. `make test` needs no network and takes about a minute. `make demo` is
+the only step that does: it pulls 41 symbols from Yahoo, which takes a couple of minutes,
+and everything after the fetch runs `--offline` against what it wrote.
 
 ---
 
@@ -21,18 +24,17 @@ open runs/momentum/report.html
 
 | Stage | Command | Output |
 |---|---|---|
-| Data | `xsbt fetch` | parquet snapshot + `manifest.json` with a SHA-256 per ticker |
+| Data | `xsbt fetch` | parquet snapshot and `manifest.json`, one SHA-256 per ticker |
 | Backtest | `xsbt run` | `daily.parquet`, `weights.parquet`, `metrics.json`, `returns.csv` |
-| Report | `xsbt report` | one self-contained `report.html`, no assets, no kernel |
+| Report | `xsbt report` | one self-contained `report.html` |
 | Integrity | `xsbt verify` | re-hashes the cache, non-zero exit on drift |
 
-Each stage is a separate verb on purpose. The artifacts in between are inspectable, the
-report can be rebuilt without re-running the backtest, and only `fetch` is allowed to
-touch the network.
+Each stage is a separate verb. The files in between are inspectable, the report can be
+rebuilt without re-running the backtest, and only `fetch` touches the network.
 
 ---
 
-## What it actually says
+## What it found
 
 Both strategies over 2010-01-04 to 2026-07-31, 4169 sessions, 40 US large caps, monthly
 rebalance, long the top quintile and short the bottom, costed at 10bps per unit traded.
@@ -47,16 +49,18 @@ rebalance, long the top quintile and short the bottom, costed at 10bps per unit 
 | Turnover p.a. | 9.0x | 18.7x |
 | Breakeven cost | 17bps | none, it loses at zero cost |
 
-Neither is tradeable, and that is the honest answer rather than a disappointing one.
-Momentum is indistinguishable from zero over the sample, and its 17bps breakeven leaves
-no room over a realistic 10bps once size is involved. Reversal is significantly negative:
-at 18.7x turnover it pays 1.87% a year in costs, and it was losing before the costs were
-charged.
+Neither is tradeable. Momentum cannot be told apart from zero over this sample, and a 17bps
+breakeven leaves nothing over a realistic 10bps once size is involved. Reversal is
+significantly negative: at 18.7x turnover it pays 1.87% a year in costs, and it was losing
+before those costs were charged.
 
-A universe of 40 survivors gives an 8-long, 8-short book, which is thin enough that these
-should be read as a check that the machinery works rather than as an estimate of the
-effect. The report says all of this on its own front page, which is the part I actually
-care about here.
+Forty survivors give an 8-long, 8-short book, which is thin. These should be read as a
+check that the machinery works, not as an estimate of the effect. The report says so on its
+own front page.
+
+A fresh fetch will land near these numbers rather than on them, because Yahoo restates
+adjusted close whenever a dividend or split settles. Two runs against one snapshot are
+byte-identical, and the suite asserts that.
 
 ---
 
@@ -66,67 +70,69 @@ care about here.
  configs/universe_us_liquid.csv
              |
              v
-     PriceRepository  <---->  PriceCache                     data layer
+     PriceRepository  <---->  PriceCache                     data
      (YahooFinanceSource)     parquet + manifest.json
              |                snapshot_id = SHA-256 over the manifest
              v
      prices: DataFrame[date x ticker]   dollar_volume: DataFrame[date x ticker]
              |
              v
-     Strategy.target_weights(prices, asof, dollar_volume)     strategy layer
+     Strategy.target_weights(prices, asof, dollar_volume)     strategy
      |  CrossSectionalRankStrategy: window -> eligible -> rank -> top/bottom slice
      |  Momentum.score() / Reversal.score()  <- all a new strategy writes
              |
              v
      run_backtest()                                           engine
      |  rebalance_dates -> apply_execution_lag -> simulate() with weight drift
-     |  LinearCostModel charges turnover on the way in and again on the way out
+     |  LinearCostModel charges turnover in and again out
              |
              v
      BacktestResult -> save(runs/<name>/)
              |
              v
      analyse() -> ReportData -> render() -> report.html       reporting
-        metrics, leg attribution, market fit, cost sweep, parameter grid
 ```
 
-The seams between those boxes are `Protocol`s (`PriceSource`, `Strategy`, `CostModel`),
-so any one of them can be swapped without the others noticing. A different vendor is a
-new class with a `fetch` method. A spread-aware cost model is a new class with a `charge`
-method.
+The seams are `Protocol`s: `PriceSource`, `Strategy`, `CostModel`. Any one of them can be
+swapped without the others noticing. A different vendor is a new class with a `fetch`
+method. A spread-aware cost model is a new class with a `charge` method.
 
 ---
 
 ## The three layers
 
-### 1. Data: reproducible, not just cached
+### 1. Data: a snapshot, not a cache
 
-Yahoo restates adjusted close every time a dividend or split lands, so the same query run
-a month apart returns different history. A backtest that re-fetches on every run is not
-reproducible, and it fails quietly rather than loudly.
+Yahoo restates adjusted close every time a dividend or split lands, so the same query run a
+month apart returns different history. A backtest that re-fetches on every run is not
+reproducible, and it fails quietly rather than loudly. So:
 
-So the cache here is a point-in-time snapshot, not a performance optimisation:
+* one parquet per ticker, holding the payload as fetched (OHLCV plus adjusted close),
+* `manifest.json` records the fetch time, row count, first and last session, the requested
+  window and a SHA-256 of the file,
+* `snapshot_id` is a SHA-256 over the whole manifest, and every run embeds it,
+* `--offline` forbids the network and replays from the cache. Tests and CI are offline only.
 
-* one parquet per ticker, holding the raw payload as fetched (OHLCV plus adjusted close),
-* `manifest.json` records the fetch timestamp, row count, first and last session, the
-  requested window and a SHA-256 of the file contents,
-* the `snapshot_id` is a SHA-256 over the whole manifest, and every run embeds it,
-* `--offline` forbids network access entirely and replays from the cache. The test suite
-  and CI run offline only.
+Two runs against the same cache produce byte-identical `metrics.json`, asserted once at the
+library level and once end to end through the CLI. What makes that hold: the resolved
+config hashes to a `config_fingerprint`, the snapshot hashes to a `snapshot_id`, both land
+in `metadata.json` and in the report, the wall clock is kept out of `metrics.json`, and
+`returns.csv` uses fixed float formatting. If the fingerprint and snapshot both match, the
+numbers match. If either moves, you can see which one it was.
 
-`xsbt verify` re-hashes every file against the manifest and exits non-zero if anything
-drifted, which makes it something you can put in a scheduled job.
+`xsbt verify` re-hashes every file against the manifest and exits non-zero on drift, so it
+can go in a scheduled job.
 
 ### 2. Strategy and engine: the strategy is small because the engine is not
 
 The engine owns everything that is easy to get subtly wrong:
 
-* **Rebalance calendar.** `M`, `W`, `Q` or `nD`, resolved against the actual session
-  index, so month end lands on the last trading day rather than on the 31st.
+* **Rebalance calendar.** `M`, `W`, `Q` or `nD`, resolved against the real session index,
+  so month end lands on the last trading day rather than on the 31st.
 * **Execution lag.** A signal formed at the close of `t` is traded at the close of
-  `t + execution_lag_days` and starts earning the session after that. Default 1.
-* **Weight drift.** Between rebalances the book is not reset. Weights drift with realised
-  returns, which is what actually happens to a portfolio nobody is touching:
+  `t + execution_lag_days` and starts earning the session after. Default 1.
+* **Weight drift.** Between rebalances the book is left alone and weights drift with
+  realised returns, which is what happens to a portfolio nobody is touching:
 
   ```
   r_p,d = sum_i w_i,d-1 * r_i,d
@@ -138,18 +144,18 @@ The engine owns everything that is easy to get subtly wrong:
 
 The strategy sees none of that. It gets a price window and returns a score.
 
-### 3. Reporting: written for the reader, not the author
+### 3. Reporting: written for the reader
 
 `report.html` is a single file with the matplotlib figures inlined as base64. It emails
-cleanly and opens on any machine. Alongside it, `metrics.json` and `returns.csv` for
+cleanly and opens on any machine. `metrics.json` and `returns.csv` sit beside it for
 anyone who would rather use their own tools.
 
-Beyond the standard block (CAGR, vol, Sharpe, Sortino, Calmar, drawdown depth and
-duration, hit rate, skew, VaR and CVaR), the sections that actually move a decision:
+Past the standard block (CAGR, vol, Sharpe, Sortino, Calmar, drawdown depth and duration,
+hit rate, skew, VaR and CVaR), the sections that move a decision:
 
 | Section | The question it answers |
 |---|---|
-| Sharpe standard error and t-stat | Is this distinguishable from luck over this sample? |
+| Sharpe standard error and t-stat | Is this different from luck over this sample? |
 | Cost sweep and breakeven bps | At what cost level does the edge die? |
 | Long leg vs short leg | Is the alpha in the hard-to-borrow short book? |
 | Beta and alpha vs SPY | Is this repackaged market exposure? |
@@ -158,8 +164,8 @@ duration, hit rate, skew, VaR and CVaR), the sections that actually move a decis
 | Yearly returns and rolling Sharpe | Does it work outside one lucky regime? |
 | Assumptions and caveats | What does this backtest not capture? |
 
-The breakeven number comes from bisection on CAGR rather than from extrapolating the
-arithmetic mean, because the arithmetic answer is systematically optimistic.
+Breakeven comes from bisection on CAGR rather than from extrapolating the arithmetic mean,
+because the arithmetic answer is systematically optimistic.
 
 ---
 
@@ -195,8 +201,8 @@ strategy:
 ```
 
 Windowing, the eligibility filter, ranking, the top and bottom split, equal weighting and
-dollar neutrality are all inherited. `score` receives the measurement window with the
-skip already applied, and higher means you want to be long.
+dollar neutrality are all inherited. `score` gets the measurement window with the skip
+already applied, and higher means you want to be long.
 
 Momentum and reversal differ by exactly one minus sign, and `tests/test_strategies.py`
 asserts that their weights come out as exact negatives of each other on the same panel.
@@ -205,38 +211,21 @@ asserts that their weights come out as exact negatives of each other on the same
 
 ## No lookahead, enforced by a test
 
-This is the failure mode that makes every other number in the report meaningless, so it
-is not left to code review.
+This is the failure that makes every other number in the report meaningless, so it is not
+left to code review.
 
-`tests/test_no_lookahead.py` runs a backtest, rewrites **all** price data strictly after
-some date `T`, re-runs, and asserts the return series up to `T` is bit-identical. Nothing
-about the future can leak backwards without that test going red.
+`tests/test_no_lookahead.py` runs a backtest, replaces **all** price data after some date
+`T` with a different random walk, re-runs, and asserts the returns up to `T` are
+bit-identical. A positive control alongside it asserts that the data after `T` does move,
+so the test cannot pass on an engine that ignores prices. A third test hands the strategy a
+panel truncated at the signal date and asserts it returns the same book.
 
-The mechanism it guards: `CrossSectionalRankStrategy.measurement_window` slices
+What they guard: `CrossSectionalRankStrategy.measurement_window` slices
 `prices.iloc[position - lookback : position - skip + 1]`, where `position` is the location
-of `asof`. Prices are handed to the strategy whole, including the future, deliberately.
-Trusting the strategy and then testing the trust is more robust than pre-slicing the
-panel, because pre-slicing hides a bug instead of catching it.
-
----
-
-## Reproducibility
-
-Two runs against the same cache produce byte-identical `metrics.json`. That is asserted
-twice, once at the library level and once end to end through the CLI.
-
-To make it hold:
-
-* the resolved config hashes to a `config_fingerprint`, a SHA-256 of canonical JSON,
-* the data snapshot hashes to a `snapshot_id`,
-* both, plus the git commit and the xsbt version, land in `metadata.json` and in the
-  report's provenance block,
-* the wall clock is deliberately kept **out** of `metrics.json` and lives in
-  `metadata.json` instead, so two identical runs diff clean,
-* `returns.csv` uses fixed float formatting for the same reason.
-
-If the fingerprint and the snapshot id both match, the numbers match. If either moves,
-the report is allowed to move with it, and you can see which one it was.
+of `asof`. Prices are handed to the strategy whole, future included, on purpose. Trusting
+the strategy and then testing the trust catches more than pre-slicing the panel would,
+because pre-slicing hides a bug instead of surfacing it. The reasoning is in
+[`docs/DESIGN.md`](docs/DESIGN.md).
 
 ---
 
@@ -249,8 +238,6 @@ invoke things.
 
 ```yaml
 name: momentum_6m_skip1m
-description: >
-  Cross-sectional 6-month momentum, skipping the most recent month.
 
 data:
   universe: configs/universe_us_liquid.csv
@@ -300,19 +287,16 @@ xsbt verify --cache-dir data/cache
 ## Development
 
 ```bash
-make lint         # ruff check src tests
-make format       # ruff format + autofix
-make typecheck    # mypy, strict, on src/
-make test         # pytest, offline
-make test-cov     # with a coverage report
-make docker       # build the container image
+make setup        # editable install and dev deps
+make check        # lint, format check, typecheck and the suite, what CI runs
 ```
 
-CI runs lint, typecheck and the full suite on Python 3.11, 3.12 and 3.13. Every test is
-offline and deterministic: the Yahoo client is tested against recorded JSON fixtures, and
-the panels used elsewhere are seeded random walks.
+Individually: `make lint`, `make format`, `make typecheck`, `make test`, `make test-cov`,
+`make docker`.
 
-Layout:
+CI runs all of it on Python 3.11, 3.12 and 3.13, plus a Docker build. Every test is offline
+and deterministic: the Yahoo client runs against recorded JSON fixtures and the panels
+elsewhere are seeded random walks.
 
 ```
 src/xsbt/
@@ -332,21 +316,21 @@ docs/               DESIGN.md, ASSUMPTIONS.md
 
 ## Scope
 
-This is a focused slice, not a platform. What it deliberately does not do, and why, is
-written up in [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). The short version:
+This is a focused slice, not a platform. What it deliberately does not do, and why, is in
+[`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md). The short version:
 
 * the universe is a fixed list of names that are liquid **today**, so it is survivorship
   biased, and that is the single largest bias in the numbers,
 * borrow cost and short financing are not modelled,
-* there is no market impact or capacity model, so the cost sweep is linear in turnover
-  and understates the cost of size,
+* there is no market impact or capacity model, so the cost sweep is linear in turnover and
+  understates the cost of size,
 * execution is at the close with no slippage between decision and fill,
-* no walk-forward fitting, so the parameter grid is a robustness check rather than a
-  selection procedure,
+* no walk-forward fitting, so the parameter grid is a robustness check and not a selection
+  procedure,
 * corporate actions are whatever Yahoo's adjusted close says they are.
 
-Every one of these is repeated in the report footer, because a report that hides its
-assumptions is worse than no report.
+All of these are repeated in the report footer, because a report that hides its assumptions
+is worse than no report.
 
 The decisions behind the design, and the alternatives I rejected, are in
 [`docs/DESIGN.md`](docs/DESIGN.md).

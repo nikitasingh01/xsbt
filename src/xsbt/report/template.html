@@ -243,10 +243,9 @@
       </tbody>
     </table>
     <p class="note">Correlation between the two legs: {{ legs.correlation | num }}.
-      {%- if legs.legs_offset %} The two legs very nearly cancel, so their shares of net
-      P&amp;L are left out: dividing a small net by two large offsetting halves gives
-      numbers in the hundreds of percent that describe the arithmetic rather than the
-      book. Read the contribution row instead.{% endif %}</p>
+      {%- if legs.legs_offset %} The two legs nearly cancel, so their shares of net P&amp;L
+      are left out: dividing a small net by two large offsetting halves gives numbers in
+      the hundreds of percent. Read the contribution row instead.{% endif %}</p>
   </div>
   <div>
     <figure><img src="{{ figures.legs }}" alt="Cumulative contribution by leg"></figure>

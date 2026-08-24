@@ -1,11 +1,9 @@
 """The test the whole design is arranged around.
 
-Prices are handed to the strategy whole, future included, rather than pre-sliced by the
-engine. That is deliberate and argued in docs/DESIGN.md, but it means the guarantee has to
-be earned by experiment: rewrite the future, re-run, and the past must not move.
-
-It lives in its own file because it is the first thing worth looking at, and because a
-failure here makes every other number in the report meaningless.
+Prices go to the strategy whole, future included, rather than pre-sliced by the engine.
+That is deliberate and argued in docs/DESIGN.md, but it means the guarantee has to be
+earned by experiment: rewrite the future, re-run, and the past must not move. A failure
+here makes every other number in the report meaningless.
 """
 
 from __future__ import annotations

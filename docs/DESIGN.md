@@ -2,7 +2,7 @@
 
 Why the code is shaped the way it is, and what I considered and did not do. The brief was
 explicit that this is a development exercise rather than a research one, so most of these
-decisions are about correctness and seams rather than about signal.
+are about correctness and seams rather than about signal.
 
 ---
 
@@ -25,13 +25,13 @@ class CostModel(Protocol):
     def charge(self, traded_notional: float) -> float: ...
 ```
 
-Structural typing rather than inheritance, because a test double should not have to
-import my base class to be a valid price source. `tests/helpers.py` has a `StubSource`
-that is a dozen lines and inherits from nothing, which is the whole argument.
+Structural typing rather than inheritance, because a test double should not have to import
+my base class to be a valid price source. `tests/helpers.py` has a `StubSource` that is a
+dozen lines and inherits from nothing, which is the whole argument.
 
-**Rejected:** a single `Backtester` class with `fetch`, `run` and `report` methods. It
-reads fine at this size and becomes untestable at three times this size, because you
-cannot exercise the engine without a network stub somewhere in the constructor.
+**Rejected:** one `Backtester` class with `fetch`, `run` and `report` on it. Reads fine at
+this size, untestable at three times it, because you cannot exercise the engine without a
+network stub somewhere in the constructor.
 
 ---
 
@@ -39,242 +39,218 @@ cannot exercise the engine without a network stub somewhere in the constructor.
 
 This looks wrong at first glance and is the decision I thought about hardest.
 
-The alternative is to slice the panel to `prices.loc[:asof]` in the engine before handing
-it over, so a strategy is physically incapable of seeing the future. That is genuinely
-safer for one strategy.
+The alternative is to slice to `prices.loc[:asof]` in the engine, so a strategy is
+physically incapable of seeing ahead. Safer for one strategy. I did not do it because it
+makes lookahead **invisible rather than impossible**: the day someone needs a longer window
+than the engine chose to hand over, they ask for the full panel back and the guarantee
+quietly evaporates. A guarantee that holds by accident of the current call site is not one.
 
-I did not do it, for two reasons:
+So `tests/test_no_lookahead.py` earns it by experiment instead: run, replace every price
+after `T` with a different random walk off the same level, re-run, assert the pre-`T`
+returns and weights are bit-identical. That catches the whole class, including the bugs you
+would not think to look for, such as an analytics function reindexing against the full
+sample.
 
-1. It makes lookahead **invisible instead of impossible**. The day someone writes a
-   strategy that needs a longer window than the engine decided to hand over, they will
-   ask for the full panel back, and the guarantee quietly evaporates. A guarantee that
-   holds by accident of the current call site is not a guarantee.
-2. Slicing on every rebalance date over a 16-year sample is a real copy cost, for a
-   protection that a test provides for free.
+Two details in that file took a second attempt:
 
-So the contract is stated in the docstring, and `tests/test_no_lookahead.py` enforces it
-by experiment rather than by construction: run, corrupt every price after `T` by a factor
-of `1e6`, re-run, assert the pre-`T` returns are bit-identical. That test catches the
-whole class of bug, including the ones you would not think to look for, such as an
-analytics function that reindexes against the full sample.
+* The first corruption scaled the future by `1e6`. That is worse, not blunter: multiplying
+  every name by the same factor leaves the cross-sectional ranking exactly where it was, so
+  it corrupts the data in the one way this strategy is blind to. A fresh walk reorders the
+  names, which is what the signal actually reads.
+* `test_the_lookahead_test_can_actually_fail` is a positive control asserting the post-`T`
+  series *does* move. Without it the file would pass on an engine that ignored prices
+  entirely, which is the failure a corruption test is most likely to hide.
 
-If the codebase grew to a dozen strategies written by people who had not read this file,
-I would add the slicing as belt and braces. At two strategies, the test is the honest
-protection and the slice would be theatre.
+A third test comes at it from the other side: hand the strategy a panel truncated at the
+signal date and assert it returns the same book. The corruption test catches a leak once it
+has changed an outcome; this one catches it where it would be introduced.
+
+At a dozen strategies written by people who had not read this file, I would add the slicing
+as well. At two, the test is the real protection and the slice would add nothing.
 
 ---
 
 ## 3. Weights drift between rebalances
 
-The naive engine holds constant weights between rebalance dates. That silently assumes a
-daily rebalance back to target, which both costs nothing in the model and is not what the
-strategy asked for.
-
+The naive engine holds weights constant between rebalance dates, which silently assumes a
+daily rebalance back to target that costs nothing and nobody asked for.
 `engine/portfolio.py` propagates the book properly:
 
 ```
-r_p,d = sum_i w_i,d-1 * r_i,d
-w_i,d = w_i,d-1 * (1 + r_i,d) / (1 + r_p,d)
+r_p,d  = sum_i w_i,d-1 * r_i,d
+w_i,d  = w_i,d-1 * (1 + r_i,d) / (1 + r_p,d)
 ```
 
-so a name that doubles becomes a bigger share of the book, exactly as it would in a real
-portfolio nobody is touching. Turnover is then the honest number: the distance from the
-drifted book to the new target, not from the original target to the new one.
-
-This also matters for the exposures chart. A dollar-neutral book does not stay
-dollar-neutral, and the report shows the drift rather than a flat line at zero.
+A name that doubles becomes a bigger share of the book, as it would in a portfolio nobody
+is touching. Turnover then means the honest thing: the distance from the drifted book to
+the new target, not from the old target to the new one. It also gives the exposure chart
+something true to draw, since a dollar-neutral book does not stay dollar neutral.
 
 ---
 
 ## 4. Cost is a drag on return, which makes repricing exact
 
-`net = gross - (bps / 1e4) * turnover`.
-
-Because the weight path drifts on **gross** return and the strategy's targets never
-consult realised costs, the entire cost sweep can be computed from one backtest:
+`net = gross - (bps / 1e4) * turnover`. Because the weight path drifts on **gross** return
+and the targets never consult realised costs, the whole cost sweep comes out of one
+backtest:
 
 ```python
 def net_returns_at(result, cost_bps):
     return result.gross_returns - (cost_bps / 1e4) * result.turnover
 ```
 
-That is exact, not an approximation, and it is why the report can show a five-level cost
-ladder plus a bisected breakeven without re-running anything. It is worth stating out
-loud in `analytics/sensitivity.py`, because the moment someone adds a cost-aware
-rebalance rule (skip the trade if the expected cost exceeds the expected edge) this stops
-being true and the sweep has to start re-running.
+Exact, not approximate, which is why the report shows a five-level ladder and a bisected
+breakeven without re-running anything. It is called out in `analytics/sensitivity.py`
+because the moment someone adds a cost-aware rebalance rule (skip the trade if cost exceeds
+expected edge) it stops being true and the sweep has to start re-running.
 
-**Rejected:** charging cost against the capital base rather than the return. It compounds
-differently and is arguably more correct for a funded book, but it makes the sweep
-require a re-run for a difference that is second order at these turnover levels.
+**Rejected:** charging cost against the capital base. Arguably more correct for a funded
+book, compounds differently, and makes the sweep need a re-run for a second-order
+difference at these turnover levels.
 
 ---
 
 ## 5. The cache is a snapshot, not a speedup
 
-The thing I did not know before starting, and had to go and check, is that Yahoo
-**rewrites history**. Adjusted close is recomputed backwards every time a dividend or
-split lands, so the same query run a month apart gives you different prices for 2015.
-
-That makes "reliably and reproducibly" in the brief a data-layer problem, not a caching
-problem. So:
+The thing I did not know before starting is that Yahoo **rewrites history**. Adjusted close
+is recomputed backwards on every dividend and split, so the same query a month apart gives
+you different prices for 2015. That makes "reliably and reproducibly" in the brief a
+data-layer problem rather than a caching one:
 
 * one parquet per ticker holding the payload as fetched, raw OHLCV plus adjusted close,
-* `manifest.json` with per-ticker fetch time, row count, first and last session, the
-  requested window and a SHA-256 of the file,
+* `manifest.json` with per-ticker fetch time, row count, first and last session, requested
+  window and a SHA-256 of the file,
 * `snapshot_id` is a SHA-256 over the manifest, embedded in every run,
 * `xsbt verify` re-hashes and exits non-zero on drift.
 
-A run is therefore reproducible against **the bytes we actually saw**, which is the
-strongest claim available without paying a vendor for point-in-time data. It is not the
-same as saying the data is right, and `docs/ASSUMPTIONS.md` says so.
+A run is reproducible against **the bytes we actually saw**, which is the strongest claim
+available without paying for point-in-time data. It is not the same as the data being
+right, and `docs/ASSUMPTIONS.md` says so.
 
-**Rejected:** SQLite or DuckDB. Parquet plus a JSON manifest is one file per ticker,
-diffable, hashable, readable by anything, and has no migration story. A database earns
-its keep at the point you need cross-sectional queries over a universe too big to hold in
-memory, which is not this.
+Two things about the client only showed up against the live endpoint, and both cost me
+enough time to be worth writing down.
 
-**Rejected:** storing only adjusted close. It halves the file size and throws away the
-ability to ever reconstruct what the adjustment did.
-
-Two things about the client that only showed up against the live endpoint, both recorded
-because they cost me time:
-
-`requests.Session()` arrives with its own `User-Agent` header already set. So
+`requests.Session()` arrives with its own `User-Agent` already set, so
 `headers.setdefault("User-Agent", browser_ua)` is a no-op, the request goes out as
-`python-requests/2.32.5`, and Yahoo returns 429 to every single call. The failure is well
-disguised: it looks exactly like being rate limited for going too fast, so the instinct is
-to slow down or add backoff, and neither does anything. It has to be plain assignment. The
-test for it uses a real `requests.Session`, because the `FakeSession` double starts with
-empty headers and hides the entire problem.
+`python-requests/2.32.5`, and Yahoo 429s every single call. The failure is well disguised:
+it looks exactly like being rate limited for going too fast, so the instinct is to slow
+down or add backoff, and neither does anything. It has to be plain assignment. The test for
+it uses a real `requests.Session`, because the `FakeSession` double starts with empty
+headers and hides the whole problem.
 
 The second is that a rate limit is a fact about the session, not about the symbol that
-tripped it. Retrying the failed request with backoff and then going back to full speed for
-the next symbol just walks into the same wall forty times. So a 429 doubles the inter-request
+tripped it. Retrying that one request with backoff and then going back to full speed means
+the next symbol hits the same limit, forty times over. So a 429 doubles the inter-request
 interval for the rest of the run, up to a ceiling, and `Retry-After` is honoured when the
 server sends one.
+
+**Rejected:** SQLite or DuckDB. Parquet plus a JSON manifest is diffable, hashable,
+readable by anything, and has no migration story. A database earns its keep when you need
+cross-sectional queries over a universe too big for memory, which is not this.
+
+**Rejected:** storing only adjusted close. Halves the file size and throws away any chance
+of reconstructing what the adjustment did.
 
 ---
 
 ## 6. Vectorised pandas, not an event loop
 
-An event-driven simulator (order objects, a fill model, a broker) is the right shape for
-intraday or for anything with partial fills and queue position. For a monthly-rebalanced
-daily-close cross-sectional book it is a large amount of machinery whose only output is a
-weight matrix multiplied by a return matrix.
+An event-driven simulator is the right shape for intraday, or for anything with partial
+fills and queue position. For a monthly-rebalanced daily-close book it is a lot of
+machinery whose only output is a weight matrix times a return matrix.
 
-The engine is roughly 50 lines of pandas and runs the 16-year backtest in well under a
-second, which is what makes the parameter grid (25 re-runs) and the cost sweep affordable
-inside a report build.
-
-The trade is that adding realistic fills later means replacing `simulate()` rather than
-extending it. I think that is the right bet: an event loop written speculatively for
-requirements nobody has stated yet is usually the wrong event loop.
+The engine is about 50 lines of pandas and runs the 16-year backtest in well under a
+second, which is what makes the 25-cell parameter grid and the cost sweep affordable inside
+a report build. The trade is that realistic fills later mean replacing `simulate()` rather
+than extending it, and I think that is the right bet: an event loop written speculatively
+for requirements nobody has stated is usually the wrong event loop.
 
 ---
 
 ## 7. Configs are frozen, validated and hashed
 
-pydantic v2 with `frozen=True` and `extra="forbid"`. The second one matters more than it
-looks: without it, `lookback_dyas: 200` is silently ignored and you spend an afternoon
-wondering why the parameter had no effect.
+pydantic v2, `frozen=True` and `extra="forbid"`. The second matters more than it looks:
+without it `lookback_dyas: 200` is silently ignored and you spend an afternoon wondering
+why the parameter had no effect.
 
-`fingerprint()` is a SHA-256 over the canonical JSON of the resolved config. Together with
+`fingerprint()` is a SHA-256 over the canonical JSON of the resolved config. With
 `snapshot_id` it is the reproducibility claim: same fingerprint plus same snapshot means
-same numbers, and if the numbers moved you can see which of the two moved first.
+the same numbers, and if they moved you can see which of the two moved first.
 
-One gotcha worth recording, because it cost me time in `analytics/sensitivity.py`:
-`model_copy(update=...)` does **not** re-run validators. Building the parameter grid by
-copying a config with a new `lookback_days` would happily produce an invalid config where
-`skip_days >= lookback_days`. The grid uses `model_validate` on a dumped dict instead.
+One gotcha, because it cost me time in `analytics/sensitivity.py`: `model_copy(update=...)`
+does **not** re-run validators, so building the grid by copying a config with a new
+`lookback_days` would happily produce one where `skip_days >= lookback_days`. The grid
+rebuilds the strategy block with `model_validate` on a dumped dict instead.
 
 ---
 
 ## 8. A skipped rebalance is a real outcome
 
-If fewer than `min_names` names are eligible on a rebalance date, the strategy returns an
-empty series and the engine holds the previous book rather than trading into a two-name
-portfolio. The count of skipped rebalances is recorded in `metadata.json` and shown in
-the report's provenance block.
+Below `min_names` eligible names the strategy returns an empty series and the engine holds
+the previous book rather than trading into a two-name portfolio. The count is in
+`metadata.json` and in the report's provenance block.
 
-The alternative, quietly ranking whatever is available, produces a backtest whose early
-years are three names levered to gross 1.0. That is not a small distortion and it is
-invisible unless you go looking.
+Quietly ranking whatever is available instead produces a backtest whose early years are
+three names levered to gross 1.0, which is not a small distortion and is invisible unless
+you go looking.
 
 ---
 
 ## 9. Session-counted annualisation
 
-CAGR is computed over `len(returns) / 252` rather than over calendar days. Calendar dating
-makes a backtest that happens to end on a Monday look different from one that ends on a
-Friday, which is noise dressed up as a result.
+CAGR over `len(returns) / 252` rather than calendar days, because calendar dating makes a
+backtest that ends on a Monday look different from one that ends on a Friday. Sharpe uses
+the Lo (2002) standard error, `SE = sqrt(252 * (1 + SR_period^2 / 2) / T)`, which assumes
+iid returns. Monthly rebalancing leaves autocorrelation in the daily series, so the
+t-statistic is optimistic and the report says so rather than quietly printing a number with
+no scale on it.
 
-Sharpe uses the Lo (2002) standard error:
-
-```
-SE(SR_annual) = sqrt(252 * (1 + SR_period^2 / 2) / T)
-```
-
-This assumes returns are iid. They are not, because monthly rebalancing leaves
-autocorrelation in the daily series, so the reported t-statistic is optimistic. The
-report says so in the caveats rather than quietly reporting a number with no scale on it.
-A Newey-West correction would be the next improvement and is the first thing on the list
-below.
-
-There is also a `FLAT_VOL = 1e-15` floor in the metrics, because pandas returns something
+There is also a `FLAT_VOL = 1e-15` floor in the metrics, because pandas gives something
 like `2e-19` for the standard deviation of a constant series rather than a clean zero, and
-dividing by that hands a reader a Sharpe ratio of 7e16. Small guard, absurd failure mode.
+dividing by that hands a reader a Sharpe of 7e16. A small guard against a very silly
+number.
 
 ---
 
 ## 10. The report is one HTML file
 
-matplotlib figures inlined as base64 data URIs, jinja2 for the page, no external assets
-and no JavaScript. It survives being emailed, opens on a locked-down laptop, and archives
-as a single artifact next to the run that produced it.
+matplotlib inlined as base64, jinja2 for the page, no external assets and no JavaScript. It
+survives being emailed, opens on a locked-down laptop, and archives next to the run that
+produced it. `metrics.json` sits beside it for anything programmatic, deliberately without
+a timestamp so two runs off one snapshot diff clean.
 
-`metrics.json` is written beside it for anything programmatic, deliberately without a
-timestamp so that two runs off one snapshot diff clean. The wall clock lives in
-`metadata.json`.
+A number being arithmetically correct is not the same as it being worth printing. The first
+real report said the long book was **562%** of the P&L and the short book **-462%**, which
+is what you get dividing a net of +2.2% by legs of +12.2% and -10.0%. Exactly right, and it
+tells a reader nothing except that the report might be broken. A long/short book nets a
+small number out of two large offsetting ones almost by construction, so the split is now
+dropped once it leaves the range a reader can interpret, and the page says why instead of
+leaving a blank cell. The same pass caught "growth stops at roughly 0 bps" on reversal:
+true, and useless, because that book loses money with costs switched off.
 
-A number being arithmetically correct is not the same as it being worth printing. Reading
-the first real report, the leg attribution said the long book was **562%** of the P&L and
-the short book **-462%**. That is what you get when you divide a net of +2.2% by legs of
-+12.2% and -10.0%, and it is exactly right, and it tells a reader nothing except that the
-report might be broken. A long/short book nets a small number out of two large offsetting
-ones almost by construction, so the split is now dropped once it leaves the range a reader
-can interpret, and the page says why instead of leaving a blank cell. The same reading pass
-caught "growth stops at roughly 0 bps" on reversal, which is true and useless: the book
-loses money with costs switched off, so no cost assumption was ever the problem.
+Neither was visible from the test suite, since both were working as designed. They are the
+argument for the last line of my plan being "open the report and read it as a PM would".
 
-Both of those are the argument for the last line of the plan being "open the report and
-read it as a PM would". Neither is visible from the test suite, because both were working
-as designed.
+**Rejected:** a notebook. Excellent for exploration, bad as a deliverable: it carries an
+execution environment, diffs badly, and the output depends on cell order.
 
-**Rejected:** a notebook. Notebooks are excellent for the exploration and bad as a
-deliverable: they carry an execution environment, they diff badly, and the output depends
-on what order somebody ran the cells in.
-
-**Rejected:** a golden-file test on the HTML. It fails on every wording change and passes
-on every change that matters. `tests/test_report.py` asserts behaviour instead: the page
-is self-contained, every section is present, the caveats are there, the verdict sentence
-matches the t-statistic, and no reader ever sees a bare `nan`.
+**Rejected:** a golden-file test on the HTML. Fails on every wording change and passes on
+every change that matters. `tests/test_report.py` asserts behaviour instead: the page is
+self-contained, every section is present, the verdict matches the t-statistic, and no
+reader ever sees a bare `nan`.
 
 ---
 
 ## 11. Tests assert arithmetic, not previous output
 
-Where a number can be worked out by hand, the expected value is worked out in the
-docstring and asserted exactly. `tests/test_portfolio.py` runs four tickers over ten days
-with weights and P&L computed on paper. `tests/test_attribution.py` does the same for
-beta, alpha and tracking error.
+Where a number can be worked out by hand, it is worked out in the docstring and asserted
+exactly. `tests/test_portfolio.py` runs four tickers over ten days with weights and P&L
+done on paper; `tests/test_attribution.py` does the same for beta, alpha and tracking
+error. The failure mode I wanted to avoid is the suite that pins whatever the code happened
+to produce on the day it was written, which locks in bugs and calls it regression coverage.
 
-The failure mode I wanted to avoid is the test suite that pins whatever the code happened
-to produce on the day it was written, which locks in bugs and calls it regression
-coverage.
-
-The Yahoo client is tested against recorded JSON fixtures, including a 404 and a 429, so
-the suite is fully offline and CI never depends on a vendor being up.
+The Yahoo client runs against recorded JSON fixtures, including a 404 and a 429, so the
+suite is fully offline and CI never depends on a vendor being up.
 
 ---
 
@@ -284,15 +260,13 @@ In rough order of what would change a decision:
 
 1. **Newey-West standard errors** on the Sharpe, so the significance test stops assuming
    independence it does not have.
-2. **A point-in-time universe.** Survivorship is the largest bias in these numbers by a
-   distance, and everything else on this list is second order next to it. A historical
-   index membership file would fix it, and until it exists no number here should be
-   treated as an estimate of live performance.
-3. **Borrow cost on the short leg**, even a crude flat annual rate, because the leg
-   attribution is currently comparing a financed leg to an unfinanced one.
+2. **A point-in-time universe.** Survivorship is the largest bias here by a distance and
+   everything below is second order next to it.
+3. **Borrow cost on the short leg**, even a crude flat rate, because the leg attribution
+   currently compares a financed leg to an unfinanced one.
 4. **Walk-forward parameter selection**, so the grid becomes a procedure rather than a
-   diagnostic, with the reported result coming from out-of-sample periods only.
-5. **A capacity model.** Linear cost in turnover understates size badly, and the
-   breakeven number is the one a PM will quote back at you.
-6. **Sector and size neutralisation** in the weighting step, which is a natural second
-   method on the rank base class alongside `score`.
+   diagnostic and the reported result is out-of-sample.
+5. **A capacity model.** Linear cost in turnover understates size badly, and breakeven is
+   the number a PM will quote back at you.
+6. **Sector and size neutralisation**, which is a natural second method on the rank base
+   alongside `score`.

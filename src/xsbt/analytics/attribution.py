@@ -18,9 +18,8 @@ from xsbt.analytics.metrics import (
     sharpe_ratio,
 )
 
-#: A leg's share of P&L is worth printing while it stays inside this range. A share above
-#: 1 is meaningful and common: it says the other leg lost money. Past 2, the two legs are
-#: mostly cancelling and the ratio has stopped describing the book.
+#: Range over which a leg's share of P&L still describes the book. Above 1 is common and
+#: just means the other leg lost money. Past 2 the two legs are mostly cancelling out.
 SHARE_RANGE = (-1.0, 2.0)
 
 
@@ -72,11 +71,10 @@ def attribute_legs(legs: pd.DataFrame) -> LegAttribution:
     short_total = float(short_leg.sum())
     combined = long_total + short_total
 
-    # A long/short book routinely nets a small number out of two large offsetting ones,
-    # and dividing by that remainder gives shares like 562% and -462%: arithmetically
-    # right, unreadable, and the first thing a PM will call a bug. Outside the readable
-    # range the split is dropped, and the report says why. NaN fails the comparison, so
-    # a book that made exactly nothing falls through here too.
+    # A long/short book nets a small number out of two large offsetting ones, so dividing
+    # by that remainder gives shares like 562% and -462%: correct, and unreadable. Outside
+    # the range the split is dropped and the report says why. NaN fails the comparison, so
+    # a book that made exactly nothing lands here too.
     share = long_total / combined if combined != 0.0 else float("nan")
     low, high = SHARE_RANGE
     if not low <= share <= high:
@@ -101,7 +99,7 @@ class MarketFit:
     """Regression of strategy excess returns on benchmark excess returns."""
 
     beta: float
-    #: Annualised intercept. This is the number that has to survive.
+    #: Annualised intercept: the part of the return the market does not explain.
     alpha: float
     r_squared: float
     correlation: float
