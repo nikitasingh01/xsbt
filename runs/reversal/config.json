@@ -1,0 +1,27 @@
+{
+  "name": "reversal_1m",
+  "data": {
+    "universe": "configs\\universe_us_liquid.csv",
+    "start": "2010-01-01",
+    "end": "2026-08-01",
+    "cache_dir": "data\\cache",
+    "field": "adj_close",
+    "benchmark": "SPY"
+  },
+  "strategy": {
+    "name": "reversal",
+    "lookback_days": 21,
+    "skip_days": 0,
+    "top_fraction": 0.2,
+    "min_names": 10,
+    "min_dollar_volume": 0.0
+  },
+  "portfolio": {
+    "rebalance": "M",
+    "execution_lag_days": 1,
+    "gross_leverage": 1.0,
+    "cost_bps": 10.0,
+    "risk_free_rate": 0.0
+  },
+  "description": "Cross-sectional short-term reversal. Long last month's losers, short its winners, equal weighted and dollar neutral, rebalanced monthly. Same engine as momentum, with the sign of the score flipped.\n"
+}

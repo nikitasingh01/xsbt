@@ -14,11 +14,13 @@ dist/
 .venv/
 venv/
 
-# Backtest artifacts. The price cache is deliberately ignored: it is reproducible
-# via `xsbt fetch`, and checking in a few MB of vendor data is not our job.
-# Anchored with a leading slash: an unanchored `data/` also matches src/xsbt/data.
+# The price cache stays out: 8 MB of Yahoo data, reproducible with `xsbt fetch`, and not
+# ours to hand around. Anchored with a leading slash, because an unanchored `data/` also
+# matches src/xsbt/data and quietly drops the data layer from the repo.
 /data/
-/runs/
+
+# `runs/` is checked in on purpose, so the two reports can be opened without installing
+# anything first. `/reports/` is the scratch path for `xsbt report --out`, so it stays out.
 /reports/
 
 # Editors / OS

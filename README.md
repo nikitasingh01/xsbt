@@ -18,6 +18,11 @@ Python 3.11 or newer. `make test` needs no network and takes about a minute. `ma
 the only step that does: it pulls 41 symbols from Yahoo, which takes a couple of minutes,
 and everything after the fetch runs `--offline` against what it wrote.
 
+Both runs are checked in under `runs/`, so you can open
+[`runs/momentum/report.html`](runs/momentum/report.html) and read the output before
+deciding whether to install anything. The price cache is not checked in, since it is 8 MB
+of vendor data that `xsbt fetch` will rebuild.
+
 ---
 
 ## What you get
