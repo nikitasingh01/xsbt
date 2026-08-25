@@ -12,9 +12,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Dependency metadata first, so a source change does not invalidate the pip layer.
-COPY pyproject.toml README.md ./
+# Installed against constraints.txt, which is the exact set the checked-in reports were
+# produced with. pyproject.toml alone would let the image drift from them.
+COPY pyproject.toml constraints.txt README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir -c constraints.txt .
 
 COPY configs ./configs
 

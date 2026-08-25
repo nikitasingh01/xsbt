@@ -6,7 +6,8 @@ START ?= 2010-01-01
 END ?= 2026-08-01
 
 help:
-	@echo "setup        install the package and dev dependencies (editable)"
+	@echo "setup        install the package and dev dependencies, pinned (editable)"
+	@echo "setup-latest same, but unpinned, to check the ranges still resolve"
 	@echo "lint         ruff check"
 	@echo "format       ruff format + fix imports"
 	@echo "format-check ruff format --check, no writes"
@@ -18,7 +19,12 @@ help:
 	@echo "docker       build the container image"
 	@echo "clean        remove caches and build artifacts"
 
+# constraints.txt is the version set the checked-in reports came off. Anyone reproducing
+# those numbers wants this one; anyone upgrading wants setup-latest.
 setup:
+	$(PY) -m pip install -c constraints.txt -e ".[dev]"
+
+setup-latest:
 	$(PY) -m pip install -e ".[dev]"
 
 lint:
