@@ -8,7 +8,7 @@ reversal differ by a minus sign and nothing else.
 from __future__ import annotations
 
 import abc
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Protocol, TypeVar, runtime_checkable
 
 import pandas as pd
 
@@ -34,23 +34,39 @@ class Strategy(Protocol):
         ...
 
 
-REGISTRY: dict[str, type[CrossSectionalRankStrategy]] = {}
+@runtime_checkable
+class StrategyFactory(Protocol):
+    """What the registry holds: something named, that a config can construct.
+
+    Deliberately keyed to ``Strategy`` and not to the rank base below. A strategy that
+    satisfies the protocol without inheriting from anything is still nameable in a YAML
+    config, which is the whole point of making the seam structural.
+    """
+
+    name: str
+
+    def __call__(self, config: StrategyConfig) -> Strategy: ...
 
 
-def register(cls: type[CrossSectionalRankStrategy]) -> type[CrossSectionalRankStrategy]:
+REGISTRY: dict[str, StrategyFactory] = {}
+
+F = TypeVar("F", bound=StrategyFactory)
+
+
+def register(cls: F) -> F:
     REGISTRY[cls.name] = cls
     return cls
 
 
-def build(config: StrategyConfig) -> CrossSectionalRankStrategy:
+def build(config: StrategyConfig) -> Strategy:
     """Instantiate the strategy named in a config."""
     try:
-        cls = REGISTRY[config.name]
+        factory = REGISTRY[config.name]
     except KeyError:
         raise KeyError(
             f"unknown strategy {config.name!r}; registered: {sorted(REGISTRY)}"
         ) from None
-    return cls(config)
+    return factory(config)
 
 
 class CrossSectionalRankStrategy(abc.ABC):

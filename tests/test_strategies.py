@@ -1,11 +1,21 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from xsbt.config import StrategyConfig
-from xsbt.strategies import REGISTRY, Momentum, Reversal, build
+from xsbt.strategies import (
+    REGISTRY,
+    CrossSectionalRankStrategy,
+    Momentum,
+    Reversal,
+    Strategy,
+    build,
+    register,
+)
 
 BASE = StrategyConfig(name="momentum", lookback_days=5, skip_days=0, top_fraction=0.25, min_names=4)
 
@@ -146,3 +156,47 @@ def test_registry_resolves_by_name() -> None:
 def test_unknown_strategy_lists_what_is_available() -> None:
     with pytest.raises(KeyError, match="registered"):
         build(config(name="wishful"))
+
+
+@pytest.fixture
+def clean_registry() -> Iterator[None]:
+    """Registering mutates a module global, so put it back on the way out."""
+    saved = dict(REGISTRY)
+    try:
+        yield
+    finally:
+        REGISTRY.clear()
+        REGISTRY.update(saved)
+
+
+@pytest.mark.usefixtures("clean_registry")
+def test_a_strategy_that_inherits_nothing_can_still_be_registered(toy_panel: pd.DataFrame) -> None:
+    """The seam is the Strategy protocol, not the rank base class.
+
+    Something that weights its book its own way has no business inheriting from a
+    cross-sectional ranker, and it should still be nameable in a YAML config. If this
+    ever needs a base class to pass, the registry has quietly narrowed the interface the
+    design notes advertise.
+    """
+
+    @register
+    class EqualWeight:
+        name = "equal_weight"
+
+        def __init__(self, settings: StrategyConfig) -> None:
+            self.config = settings
+
+        def target_weights(
+            self,
+            prices: pd.DataFrame,
+            asof: pd.Timestamp,
+            dollar_volume: pd.DataFrame | None = None,
+        ) -> pd.Series:
+            live = prices.loc[asof].dropna().index
+            return pd.Series(1.0 / len(live), index=live)
+
+    built = build(config(name="equal_weight"))
+
+    assert isinstance(built, Strategy)
+    assert not isinstance(built, CrossSectionalRankStrategy)
+    assert built.target_weights(toy_panel, toy_panel.index[7]).sum() == pytest.approx(1.0)

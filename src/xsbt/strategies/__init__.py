@@ -4,6 +4,7 @@ from xsbt.strategies.base import (
     REGISTRY,
     CrossSectionalRankStrategy,
     Strategy,
+    StrategyFactory,
     build,
     register,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "Momentum",
     "Reversal",
     "Strategy",
+    "StrategyFactory",
     "build",
     "register",
 ]
