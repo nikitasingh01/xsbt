@@ -84,15 +84,19 @@ rebate without borrow data is worse than leaving it out.
 
 ## Statistics
 
-**The Sharpe standard error assumes iid returns**, following Lo (2002):
-`SE = sqrt(252 * (1 + SR_period^2 / 2) / T)`. Monthly rebalancing leaves autocorrelation in
-the daily series, so the true error is larger and the reported t-stat is optimistic.
-Newey-West is the fix and is first on the list at the end of `DESIGN.md`.
+**The Sharpe error bar is adjusted for autocorrelation, not for the search.** The base
+result is Lo (2002), `SE = sqrt(252 * (1 + SR_period^2 / 2) / T)`, which is derived for iid
+returns. A book carried for a month is not iid, so the bar is rescaled by a Newey-West
+factor over the run's own holding horizon, and both versions are on the report. On these two
+runs the factor came out below 1, so the adjusted bar is the tighter of the two. That is the
+estimator doing its job on a series that alternates rather than trends, and not a sign that
+the correction was skipped.
 
 **Nothing is charged for the parameter search.** The grid is 25 configurations and the
 t-stat on the chosen cell takes the sample at face value. That is why the grid is a
 robustness check and not a selection procedure: it answers "is this cell surrounded by
-good cells", not "which cell is best". Every cell is scored in-sample.
+good cells", not "which cell is best". Every cell is scored in-sample. A borderline t-stat
+should be read as generous for that reason.
 
 **Annualisation is by session count**, 252 throughout, with CAGR over `len(returns) / 252`.
 Calendar dating makes a run that ends on a Monday look different from one that ends on a

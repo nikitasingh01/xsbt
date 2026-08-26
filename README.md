@@ -8,20 +8,24 @@ Momentum and reversal both ship with it, but the point of the repo is the machin
 underneath. Adding a third strategy is one file and one method.
 
 ```bash
-make setup                 # editable install and dev deps
+make setup                 # editable install, pinned
 make test                  # full suite, offline
 make demo                  # fetch, run both strategies, build both reports
 open runs/momentum/report.html
 ```
 
 Python 3.11 or newer. `make test` needs no network and takes about a minute. `make demo` is
-the only step that does: it pulls 41 symbols from Yahoo, which takes a couple of minutes,
-and everything after the fetch runs `--offline` against what it wrote.
+the only step that does: it pulls 41 symbols from Yahoo, and everything after the fetch runs
+`--offline` against what it wrote.
+
+`make setup` installs against [`constraints.txt`](constraints.txt), the exact versions the
+checked-in reports came off. `make setup-latest` takes the ranges in `pyproject.toml`
+instead, which is what the CI version matrix does.
 
 Both runs are checked in under `runs/`, so you can open
 [`runs/momentum/report.html`](runs/momentum/report.html) and read the output before
-deciding whether to install anything. The price cache is not checked in, since it is 8 MB
-of vendor data that `xsbt fetch` will rebuild.
+installing anything. The price cache is not, since it is 8 MB of vendor data that
+`xsbt fetch` rebuilds.
 
 ---
 
@@ -49,23 +53,24 @@ rebalance, long the top quintile and short the bottom, costed at 10bps per unit 
 | CAGR, net | 0.66% | -5.53% |
 | Volatility | 10.99% | 9.78% |
 | Sharpe, net | 0.12 | -0.53 |
-| Sharpe t-stat | 0.47 | -2.17 |
+| Sharpe t-stat | 0.49 | -2.46 |
 | Max drawdown | -34.9% | -64.6% |
 | Turnover p.a. | 9.0x | 18.7x |
 | Breakeven cost | 17bps | none, it loses at zero cost |
 
-Neither is tradeable. Momentum cannot be told apart from zero over this sample, and a 17bps
-breakeven leaves nothing over a realistic 10bps once size is involved. Reversal is
-significantly negative: at 18.7x turnover it pays 1.87% a year in costs, and it was losing
-before those costs were charged.
+The t-stat carries a Newey-West error bar over one holding period rather than the iid one,
+since a book held for a month leaves its daily returns correlated. Both bars are on the
+report so the size of that adjustment is visible.
 
-Forty survivors give an 8-long, 8-short book, which is thin. These should be read as a
-check that the machinery works, not as an estimate of the effect. The report says so on its
-own front page.
+Neither strategy is tradeable. Momentum cannot be told apart from zero over this sample, and
+a 17bps breakeven leaves nothing over a realistic 10bps once size is involved. Reversal is
+significantly negative, and its per-name table says why: the damage is concentrated in
+shorting NVDA, TSLA, NFLX and AAPL.
 
+Forty survivors give an 8-long, 8-short book, which is thin. Read these as a check that the
+machinery works, not as an estimate of the effect. The report says so on its own front page.
 A fresh fetch will land near these numbers rather than on them, because Yahoo restates
-adjusted close whenever a dividend or split settles. Two runs against one snapshot are
-byte-identical, and the suite asserts that.
+adjusted close whenever a dividend or split settles.
 
 ---
 
@@ -98,61 +103,31 @@ byte-identical, and the suite asserts that.
      analyse() -> ReportData -> render() -> report.html       reporting
 ```
 
-The seams are `Protocol`s: `PriceSource`, `Strategy`, `CostModel`. Any one of them can be
-swapped without the others noticing. A different vendor is a new class with a `fetch`
-method. A spread-aware cost model is a new class with a `charge` method.
+The seams are `Protocol`s: `PriceSource`, `Strategy`, `CostModel`. Any one can be swapped
+without the others noticing. A different vendor is a new class with a `fetch` method; a
+spread-aware cost model is a new class with a `charge` method.
+
+**Data is a snapshot, not a cache.** Yahoo restates adjusted close on every dividend and
+split, so re-fetching on each run is not reproducible and fails quietly rather than loudly.
+One parquet per ticker holds the payload as fetched, `manifest.json` carries a SHA-256 per
+file, and `snapshot_id` hashes the manifest. Same `config_fingerprint` plus same
+`snapshot_id` means the same numbers, and `metrics.json` keeps the wall clock out so two
+runs off one snapshot are byte-identical. The suite asserts that; `xsbt verify` re-hashes
+the cache and exits non-zero on drift.
+
+**The strategy is small because the engine is not.** The engine owns the rebalance calendar
+(resolved against real sessions, so month end is the last trading day), the execution lag
+(signal at the close of `t`, traded at `t + execution_lag_days`), the weight drift between
+rebalances, and the cost charge on turnover. A strategy gets a price window and returns a
+score. The reasoning behind each is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ---
 
-## The three layers
+## The report
 
-### 1. Data: a snapshot, not a cache
-
-Yahoo restates adjusted close every time a dividend or split lands, so the same query run a
-month apart returns different history. A backtest that re-fetches on every run is not
-reproducible, and it fails quietly rather than loudly. So:
-
-* one parquet per ticker, holding the payload as fetched (OHLCV plus adjusted close),
-* `manifest.json` records the fetch time, row count, first and last session, the requested
-  window and a SHA-256 of the file,
-* `snapshot_id` is a SHA-256 over the whole manifest, and every run embeds it,
-* `--offline` forbids the network and replays from the cache. Tests and CI are offline only.
-
-Two runs against the same cache produce byte-identical `metrics.json`, asserted at the
-library level and again end to end through the CLI. The resolved config hashes to a
-`config_fingerprint` and the snapshot to a `snapshot_id`, both go into `metadata.json` and
-into the report, and the wall clock is kept out of `metrics.json`. Same fingerprint plus
-same snapshot means the same numbers; if either moves, you can see which one it was.
-
-`xsbt verify` re-hashes every file against the manifest and exits non-zero on drift, so it
-can go in a scheduled job.
-
-### 2. Strategy and engine: the strategy is small because the engine is not
-
-The engine owns everything that is easy to get subtly wrong:
-
-* **Rebalance calendar.** `M`, `W`, `Q` or `nD`, resolved against the real session index,
-  so month end lands on the last trading day rather than on the 31st.
-* **Execution lag.** A signal formed at the close of `t` is traded at the close of
-  `t + execution_lag_days` and starts earning the session after. Default 1.
-* **Weight drift.** Between rebalances the book is left alone and weights drift with
-  realised returns, which is what happens to a portfolio nobody is touching:
-
-  ```
-  r_p,d = sum_i w_i,d-1 * r_i,d
-  w_i,d = w_i,d-1 * (1 + r_i,d) / (1 + r_p,d)
-  ```
-
-* **Costs.** Turnover is notional traded over NAV, charged linearly at `cost_bps` on the
-  way in and again on the way out.
-
-The strategy sees none of that. It gets a price window and returns a score.
-
-### 3. Reporting: written for the reader
-
-`report.html` is a single file with the matplotlib figures inlined as base64. It emails
-cleanly and opens on any machine. `metrics.json` and `returns.csv` sit beside it for
-anyone who would rather use their own tools.
+One self-contained HTML file with the figures inlined as base64, so it emails cleanly and
+opens anywhere. `metrics.json` and `returns.csv` sit beside it for anyone who would rather
+use their own tools.
 
 Past the standard block (CAGR, vol, Sharpe, Sortino, Calmar, drawdown depth and duration,
 hit rate, skew, VaR and CVaR), the sections that move a decision:
@@ -162,6 +137,7 @@ hit rate, skew, VaR and CVaR), the sections that move a decision:
 | Sharpe standard error and t-stat | Is this different from luck over this sample? |
 | Cost sweep and breakeven bps | At what cost level does the edge die? |
 | Long leg vs short leg | Is the alpha in the hard-to-borrow short book? |
+| Per-name contributions | Is the P&L forty names, or three? |
 | Beta and alpha vs SPY | Is this repackaged market exposure? |
 | Turnover and cost drag | What does this cost to run? |
 | Parameter grid, lookback x top fraction | Is the config a cherry-picked peak? |
@@ -196,49 +172,40 @@ class LowVolatility(CrossSectionalRankStrategy):
         return -window.pct_change().std()
 ```
 
-Import it in `strategies/__init__.py` so the registry sees it, then point a config at it:
+Import it in `strategies/__init__.py` so the registry sees it, then point a config at
+`name: low_volatility`. Windowing, the eligibility filter, ranking, the top and bottom
+split, equal weighting and dollar neutrality are all inherited. `score` gets the measurement
+window with the skip already applied, and higher means you want to be long.
 
-```yaml
-strategy:
-  name: low_volatility
-  lookback_days: 63
-```
-
-Windowing, the eligibility filter, ranking, the top and bottom split, equal weighting and
-dollar neutrality are all inherited. `score` gets the measurement window with the skip
-already applied, and higher means you want to be long.
-
-Momentum and reversal differ by exactly one minus sign, and `tests/test_strategies.py`
-asserts that their weights come out as exact negatives of each other on the same panel.
+The base class is a convenience, not a requirement: `register` takes anything satisfying the
+`Strategy` protocol, so something that weights its book its own way is named in a config the
+same way and never touches the rank machinery. `tests/test_strategies.py` pins both halves
+of that, and also that momentum and reversal come out as exact negatives of each other,
+since they differ by a single minus sign.
 
 ---
 
 ## No lookahead, enforced by a test
 
 This is the failure that makes every other number in the report meaningless, so it is not
-left to code review.
+left to code review. `tests/test_no_lookahead.py` runs a backtest, replaces **all** price
+data after some date `T` with a different random walk, re-runs, and asserts the returns up
+to `T` are bit-identical. A positive control alongside it asserts the data after `T` does
+move, so the test cannot pass on an engine that ignores prices. A third test hands the
+strategy a panel truncated at the signal date and asserts it returns the same book.
 
-`tests/test_no_lookahead.py` runs a backtest, replaces **all** price data after some date
-`T` with a different random walk, re-runs, and asserts the returns up to `T` are
-bit-identical. A positive control alongside it asserts that the data after `T` does move,
-so the test cannot pass on an engine that ignores prices. A third test hands the strategy a
-panel truncated at the signal date and asserts it returns the same book.
-
-What they guard: `CrossSectionalRankStrategy.measurement_window` slices
-`prices.iloc[position - lookback : position - skip + 1]`, where `position` is the location
-of `asof`. Prices are handed to the strategy whole, future included, on purpose. Trusting
-the strategy and then testing the trust catches more than pre-slicing the panel would,
-because pre-slicing hides a bug instead of surfacing it. The reasoning is in
-[`docs/DESIGN.md`](docs/DESIGN.md).
+Prices are handed to the strategy whole, future included, on purpose. Trusting the strategy
+and then testing the trust catches more than pre-slicing the panel would, because slicing
+hides a bug instead of surfacing it. Full reasoning in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ---
 
 ## Configuration
 
 One YAML per strategy, validated by pydantic with `extra="forbid"`, so a typo is an error
-rather than a silently ignored key. Paths are relative to your working directory, not to
-the config file: one rule, and it matches how the CLI, the Makefile and the container all
-invoke things.
+rather than a silently ignored key. Paths are relative to your working directory, not to the
+config file: one rule, and it matches how the CLI, the Makefile and the container all invoke
+things.
 
 ```yaml
 name: momentum_6m_skip1m
@@ -291,16 +258,18 @@ xsbt verify --cache-dir data/cache
 ## Development
 
 ```bash
-make setup        # editable install and dev deps
+make setup        # editable install against constraints.txt
 make check        # lint, format check, typecheck and the suite, what CI runs
 ```
 
 Individually: `make lint`, `make format`, `make typecheck`, `make test`, `make test-cov`,
 `make docker`.
 
-CI runs all of it on Python 3.11, 3.12 and 3.13, plus a Docker build. Every test is offline
-and deterministic: the Yahoo client runs against recorded JSON fixtures and the panels
-elsewhere are seeded random walks.
+CI runs the check on Python 3.11, 3.12 and 3.13 unpinned, to prove the ranges in
+`pyproject.toml` still resolve, then once more against `constraints.txt`, to prove the
+published numbers still reproduce, then a Docker build. Every test is offline and
+deterministic: the Yahoo client runs against recorded JSON fixtures and the panels elsewhere
+are seeded random walks.
 
 ```
 src/xsbt/
@@ -320,14 +289,12 @@ docs/               DESIGN.md, ASSUMPTIONS.md
 
 ## Scope
 
-A focused slice, not a platform. The biggest gap by a distance is survivorship: the
-universe is 40 names that are liquid **today**, so nothing delisted or acquired since 2010
-is in it. After that, borrow cost is not charged, there is no capacity model so the cost
-sweep understates size, execution is at the close with no slippage, the parameter grid is a
-robustness check rather than a selection procedure, and corporate actions are whatever
-Yahoo's adjustment says they are.
+A focused slice, not a platform. The biggest gap by a distance is survivorship: the universe
+is 40 names that are liquid **today**, so nothing delisted or acquired since 2010 is in it.
+After that, borrow cost is not charged, there is no capacity model so the cost sweep
+understates size, execution is at the close with no slippage, and the parameter grid is a
+robustness check rather than a selection procedure.
 
-All of it is written up in [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) and repeated in the
-report footer, because a report that hides its assumptions is worse than no report. The
-design decisions, and the alternatives I turned down, are in
-[`docs/DESIGN.md`](docs/DESIGN.md).
+All of it is in [`docs/ASSUMPTIONS.md`](docs/ASSUMPTIONS.md) and repeated in the report
+footer, because a report that hides its assumptions is worse than no report. The design
+decisions, and the alternatives I turned down, are in [`docs/DESIGN.md`](docs/DESIGN.md).
