@@ -169,24 +169,24 @@ def report(
     """Rebuild the report from a saved run, without re-running the backtest.
 
     Prices are re-read from the cache offline, because a report on a past run has no
-    business fetching anything new. If the cache has moved on, the parameter sweep is
-    dropped and the rest of the page is still produced.
+    business fetching anything new. If the cache has moved on, the sections that need the
+    panel are dropped and the rest of the page is still produced.
     """
     with friendly_errors():
         result = BacktestResult.load(run_dir)
 
         market = None
-        if grid:
-            try:
-                repository = open_repository(result.config.data, offline=True)
-                market = load_market_data(result.config.data, repository)
-            except (DataError, FileNotFoundError) as exc:
-                console.print(f"[yellow]note[/] parameter sweep skipped: {exc}")
+        try:
+            repository = open_repository(result.config.data, offline=True)
+            market = load_market_data(result.config.data, repository)
+        except (DataError, FileNotFoundError) as exc:
+            console.print(f"[yellow]note[/] per-name and parameter sections skipped: {exc}")
 
         data = analyse(
             result,
             prices=market.prices if market else None,
             dollar_volume=market.dollar_volume if market else None,
+            include_grid=grid,
         )
         target = write_html(data, out or run_dir / REPORT_FILE)
         write_metrics(data, run_dir / METRICS_FILE)
@@ -277,8 +277,9 @@ def _write_artifacts(
 ) -> ReportData:
     data = analyse(
         result,
-        prices=market.prices if grid else None,
+        prices=market.prices,
         dollar_volume=market.dollar_volume,
+        include_grid=grid,
     )
     write_metrics(data, directory / METRICS_FILE)
     write_returns(result, directory / RETURNS_FILE)
@@ -297,7 +298,7 @@ def _print_summary(data: ReportData) -> None:
         ("period", f"{net.start} to {net.end} ({net.years:.1f}y)"),
         ("CAGR, net", f"{net.cagr:.2%}"),
         ("volatility", f"{net.ann_volatility:.2%}"),
-        ("Sharpe, net", f"{net.sharpe:.2f} (t = {net.sharpe_tstat:.2f})"),
+        ("Sharpe, net", f"{net.sharpe:.2f} (t = {net.sharpe_tstat_hac:.2f})"),
         ("max drawdown", f"{net.max_drawdown:.2%}"),
         ("turnover p.a.", f"{net.ann_turnover:.2f}x over {net.trades} rebalances"),
         ("cost drag p.a.", f"{net.ann_cost_drag:.2%}"),

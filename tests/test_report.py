@@ -25,6 +25,7 @@ from xsbt.report.html import (
     cost_ladder,
     grid_fractions,
     grid_lookbacks,
+    holding_horizon,
     render,
     significance_note,
     write_html,
@@ -67,7 +68,8 @@ def report_with_grid(panel: pd.DataFrame, result: BacktestResult) -> ReportData:
 
 
 def summary_with_tstat(base: PerformanceSummary, t: float) -> PerformanceSummary:
-    return dataclasses.replace(base, sharpe_tstat=t)
+    """The verdict keys off the autocorrelation-adjusted t, so that is the one to move."""
+    return dataclasses.replace(base, sharpe_tstat_hac=t)
 
 
 def test_analyse_fills_in_every_section(report: ReportData) -> None:
@@ -85,6 +87,94 @@ def test_costs_only_ever_reduce_the_headline(report: ReportData) -> None:
 
 def test_the_grid_is_dropped_rather_than_faked_without_prices(report: ReportData) -> None:
     assert report.grid is None
+    assert report.names is None
+
+
+def test_per_name_attribution_adds_up_to_the_gross_pnl(
+    report_with_grid: ReportData, result: BacktestResult
+) -> None:
+    """The engine and the analytics layer computing the same P&L two different ways.
+
+    The engine sums weight times return across names each day; this sums the same
+    products across days per name. If the two ever disagree, one of them is wrong about
+    which weights earned which return, which is the lookahead bug wearing a disguise.
+    """
+    names = report_with_grid.names
+
+    assert names is not None
+    assert names.names_held <= len(result.weights.columns)
+    assert 0.0 <= names.concentration <= 1.0
+    assert names.table["contribution"].sum() == pytest.approx(
+        float(result.gross_returns.sum()), abs=1e-9
+    )
+
+
+def test_the_cheap_price_section_survives_turning_the_expensive_one_off(
+    result: BacktestResult, panel: pd.DataFrame
+) -> None:
+    """--no-grid is about the few dozen re-runs, not about the names.
+
+    Totalling contributions is one multiply over a panel we already have in memory, so
+    there is no reason for it to be collateral damage when someone wants a fast report.
+    """
+    data = analyse(result, prices=panel, include_grid=False)
+
+    assert data.grid is None
+    assert data.names is not None
+
+
+def test_the_contributor_tables_read_outward_from_zero(report_with_grid: ReportData) -> None:
+    names = report_with_grid.names
+
+    assert names is not None
+    best = names.best()["contribution"]
+    worst = names.worst()["contribution"]
+
+    assert list(best) == sorted(best, reverse=True)
+    assert list(worst) == sorted(worst)
+    assert best.iloc[0] >= worst.iloc[0]
+
+
+def test_the_contributor_section_appears_only_when_there_are_names(
+    report: ReportData, report_with_grid: ReportData
+) -> None:
+    assert "Biggest contributors" not in render(report)
+    assert "Per-name contributions need the price panel" in render(report)
+    assert "Biggest contributors" in render(report_with_grid)
+
+
+def test_the_cost_row_as_run_agrees_with_the_headline_card(report: ReportData) -> None:
+    """Both are the same series at the same cost, so they have to be the same numbers.
+
+    Worth pinning, because the t-stat column and the headline both got an autocorrelation
+    correction and it would be easy to widen one and not the other. A reader who spots
+    two different t-stats for one run stops trusting the whole page.
+    """
+    configured = report.result.config.portfolio.cost_bps
+    row = report.cost_sensitivity.loc[configured]
+
+    assert row["sharpe"] == pytest.approx(report.net.sharpe)
+    assert row["sharpe_tstat"] == pytest.approx(report.net.sharpe_tstat_hac)
+    assert row["cagr"] == pytest.approx(report.net.cagr)
+
+
+def test_the_holding_horizon_comes_from_the_run_not_a_rule_of_thumb(
+    result: BacktestResult, report: ReportData
+) -> None:
+    """Monthly rebalancing over a daily calendar is roughly 21 sessions a book."""
+    lags = holding_horizon(result)
+
+    assert lags is not None
+    assert 18 <= lags <= 24
+    assert report.net.hac_lags == lags
+
+
+def test_the_holding_horizon_falls_back_when_the_run_never_recorded_one(
+    result: BacktestResult,
+) -> None:
+    stripped = dataclasses.replace(result, metadata={})
+
+    assert holding_horizon(stripped) is None
 
 
 def test_the_grid_brackets_the_configured_setting(

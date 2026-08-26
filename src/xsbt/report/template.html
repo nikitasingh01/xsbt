@@ -102,7 +102,7 @@
 <div class="cards">
   <div class="card"><div class="label">CAGR, net</div><div class="value">{{ net.cagr | pct }}</div></div>
   <div class="card"><div class="label">Sharpe, net</div><div class="value">{{ net.sharpe | num }}</div></div>
-  <div class="card"><div class="label">Sharpe t-stat</div><div class="value">{{ net.sharpe_tstat | num }}</div></div>
+  <div class="card"><div class="label">Sharpe t-stat</div><div class="value">{{ net.sharpe_tstat_hac | num }}</div></div>
   <div class="card"><div class="label">Max drawdown</div><div class="value">{{ net.max_drawdown | pct(1) }}</div></div>
   <div class="card"><div class="label">Turnover p.a.</div><div class="value">{{ net.ann_turnover | num(1) }}x</div></div>
   <div class="card"><div class="label">Breakeven cost</div><div class="value">{{ breakeven | num(0) }}<span style="font-size:13px">bps</span></div></div>
@@ -129,7 +129,8 @@
     <h3>Risk</h3>
     <dl class="kv">
       <div><dt>Volatility p.a.</dt><dd>{{ net.ann_volatility | pct }}</dd></div>
-      <div><dt>Sharpe (SE {{ net.sharpe_se | num }})</dt><dd>{{ net.sharpe | num }}</dd></div>
+      <div><dt>Sharpe (SE {{ net.sharpe_se_hac | num }})</dt><dd>{{ net.sharpe | num }}</dd></div>
+      <div><dt>SE if returns were iid</dt><dd>{{ net.sharpe_se | num }}</dd></div>
       <div><dt>Sortino</dt><dd>{{ net.sortino | num }}</dd></div>
       <div><dt>Calmar</dt><dd>{{ net.calmar | num }}</dd></div>
       <div><dt>Daily VaR 95%</dt><dd>{{ net.var_95 | pct }}</dd></div>
@@ -235,7 +236,7 @@
     <table>
       <thead><tr><th></th><th class="num">Long book</th><th class="num">Short book</th></tr></thead>
       <tbody>
-        <tr><td>Contribution p.a.</td><td class="num">{{ legs.long_ann_return | pct }}</td><td class="num">{{ legs.short_ann_return | pct }}</td></tr>
+        <tr><td>Contribution p.a., arithmetic</td><td class="num">{{ legs.long_ann_return | pct }}</td><td class="num">{{ legs.short_ann_return | pct }}</td></tr>
         <tr><td>Volatility p.a.</td><td class="num">{{ legs.long_ann_volatility | pct }}</td><td class="num">{{ legs.short_ann_volatility | pct }}</td></tr>
         <tr><td>Sharpe</td><td class="num">{{ legs.long_sharpe | num }}</td><td class="num">{{ legs.short_sharpe | num }}</td></tr>
         <tr><td>Hit rate</td><td class="num">{{ legs.long_hit_rate | pct(1) }}</td><td class="num">{{ legs.short_hit_rate | pct(1) }}</td></tr>
@@ -243,6 +244,8 @@
       </tbody>
     </table>
     <p class="note">Correlation between the two legs: {{ legs.correlation | num }}.
+      Contributions are daily and additive, so they are annualised as a mean rather than
+      compounded, and the two will not add up to the headline CAGR above.
       {%- if legs.legs_offset %} The two legs nearly cancel, so their shares of net P&amp;L
       are left out: dividing a small net by two large offsetting halves gives numbers in
       the hundreds of percent. Read the contribution row instead.{% endif %}</p>
@@ -251,6 +254,54 @@
     <figure><img src="{{ figures.legs }}" alt="Cumulative contribution by leg"></figure>
   </div>
 </div>
+
+{% if names %}
+<h3>Biggest contributors</h3>
+<p class="note">
+  Every name totalled over the sample, before costs. Shares are of gross P&amp;L measured in
+  absolute terms, so they stay readable on a book whose two legs offset.
+  The largest {{ names.concentration_names }} names carry
+  <strong>{{ names.concentration | pct(1) }}</strong> of it across
+  {{ names.names_held }} names held.
+</p>
+<div class="grid2">
+  <div>
+    <table>
+      <thead><tr><th>Made the most</th><th class="num">Contribution</th><th class="num">Share</th><th class="num">Sessions</th></tr></thead>
+      <tbody>
+      {% for row in best_names %}
+        <tr>
+          <td>{{ row.ticker }}</td>
+          <td class="num pos">{{ row.contribution | signed }}</td>
+          <td class="num">{{ row.share_of_gross | pct(1) }}</td>
+          <td class="num">{{ row.sessions_held }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div>
+    <table>
+      <thead><tr><th>Lost the most</th><th class="num">Contribution</th><th class="num">Share</th><th class="num">Sessions</th></tr></thead>
+      <tbody>
+      {% for row in worst_names %}
+        <tr>
+          <td>{{ row.ticker }}</td>
+          <td class="num neg">{{ row.contribution | signed }}</td>
+          <td class="num">{{ row.share_of_gross | pct(1) }}</td>
+          <td class="num">{{ row.sessions_held }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<p class="note">
+  Per-name contributions need the price panel, which was not available. Re-run
+  <code>xsbt report</code> against a populated cache to include them.
+</p>
+{% endif %}
 
 <h2>Market exposure</h2>
 {% if market %}

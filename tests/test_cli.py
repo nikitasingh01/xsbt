@@ -214,7 +214,9 @@ def test_report_can_write_the_page_anywhere(project: Project) -> None:
     assert (project.root / "share" / "test.html").exists()
 
 
-def test_report_drops_the_sweep_rather_than_reaching_for_the_network(project: Project) -> None:
+def test_report_drops_what_needs_prices_rather_than_reaching_for_the_network(
+    project: Project,
+) -> None:
     """A report on a past run has no business fetching anything new."""
     runner.invoke(app, ["run", "-c", str(project.config), "--offline", "--no-grid"])
     for parquet in (project.cache_dir / "prices").glob("*.parquet"):
@@ -223,7 +225,7 @@ def test_report_drops_the_sweep_rather_than_reaching_for_the_network(project: Pr
     result = runner.invoke(app, ["report", "--run", "runs/test"])
 
     assert result.exit_code == 0, result.output
-    assert "parameter sweep skipped" in result.output
+    assert "per-name and parameter sections skipped" in result.output
     assert (project.root / "runs" / "test" / "report.html").exists()
 
 

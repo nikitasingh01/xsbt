@@ -18,7 +18,14 @@ import pandas as pd
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from xsbt import __version__
-from xsbt.analytics.attribution import LegAttribution, MarketFit, attribute_legs, fit_market
+from xsbt.analytics.attribution import (
+    LegAttribution,
+    MarketFit,
+    NameAttribution,
+    attribute_legs,
+    attribute_names,
+    fit_market,
+)
 from xsbt.analytics.metrics import PerformanceSummary, summarise, yearly_returns
 from xsbt.analytics.sensitivity import (
     DEFAULT_COST_LEVELS,
@@ -69,9 +76,11 @@ CAVEATS: tuple[tuple[str, str], ...] = (
     ),
     (
         "Significance",
-        "The Sharpe standard error follows Lo (2002) and assumes returns are independent. "
-        "Monthly rebalancing leaves autocorrelation in the daily series, so the reported "
-        "t-statistic is optimistic. It is also not corrected for the parameters searched.",
+        "The Sharpe standard error starts from Lo (2002) and is then rescaled by a "
+        "Newey-West factor over one holding period, because carrying the same book for a "
+        "month leaves the daily returns correlated. Both bars are shown, so the size of "
+        "that adjustment is visible. Neither is corrected for the parameters searched, so "
+        "treat borderline t-statistics as generous.",
     ),
 )
 
@@ -84,6 +93,8 @@ class ReportData:
     net: PerformanceSummary
     gross: PerformanceSummary
     legs: LegAttribution
+    #: None when the report was generated without the price panel to total names over.
+    names: NameAttribution | None
     #: None when the run has no benchmark, or too little overlap to fit one.
     market: MarketFit | None
     cost_sensitivity: pd.DataFrame
@@ -105,6 +116,7 @@ class ReportData:
             "net": self.net.as_dict(),
             "gross": self.gross.as_dict(),
             "legs": self.legs.as_dict(),
+            "names": self.names.as_dict() if self.names is not None else None,
             "market": self.market.as_dict() if self.market is not None else None,
             "cost_sensitivity": _records(self.cost_sensitivity),
             "breakeven_cost_bps": _json_value(self.breakeven_bps),
@@ -119,28 +131,38 @@ def analyse(
     prices: pd.DataFrame | None = None,
     dollar_volume: pd.DataFrame | None = None,
     cost_levels: Sequence[float] | None = None,
+    include_grid: bool = True,
 ) -> ReportData:
     """Run every diagnostic the report shows.
 
     Args:
         result: a finished backtest.
-        prices: the panel the run used. Supply it to get the parameter grid, which needs
-            to re-run the backtest a few dozen times. Without it that section is dropped
-            rather than faked.
+        prices: the panel the run used. Supply it for the two sections that need the
+            underlying names: per-name attribution and the parameter grid. Without it
+            they are dropped rather than faked.
         dollar_volume: matching volume panel, so grid cells apply the same liquidity floor.
         cost_levels: bps levels for the cost sweep. Defaults to a standard ladder plus
             whatever this run assumed.
+        include_grid: the grid re-runs the backtest a few dozen times, which is by far
+            the slowest thing here. Turning it off leaves the rest of the page intact.
     """
     portfolio = result.config.portfolio
     hurdle = portfolio.risk_free_rate
+    lags = holding_horizon(result)
 
     net = summarise(
         result.returns,
         risk_free_rate=hurdle,
         turnover=result.turnover,
         costs=result.costs,
+        hac_lags=lags,
     )
-    gross = summarise(result.gross_returns, risk_free_rate=hurdle, turnover=result.turnover)
+    gross = summarise(
+        result.gross_returns,
+        risk_free_rate=hurdle,
+        turnover=result.turnover,
+        hac_lags=lags,
+    )
 
     levels = cost_ladder(portfolio.cost_bps) if cost_levels is None else tuple(cost_levels)
 
@@ -153,27 +175,47 @@ def analyse(
             log.warning("skipping the market fit: %s", exc)
 
     grid = None
+    names = None
     if prices is not None:
-        strategy = result.config.strategy
-        grid = parameter_grid(
-            prices,
-            result.config,
-            lookbacks=grid_lookbacks(strategy),
-            top_fractions=grid_fractions(strategy),
-            dollar_volume=dollar_volume,
+        names = attribute_names(
+            result.weights, prices.pct_change(fill_method=None).reindex_like(result.weights)
         )
+        if include_grid:
+            strategy = result.config.strategy
+            grid = parameter_grid(
+                prices,
+                result.config,
+                lookbacks=grid_lookbacks(strategy),
+                top_fractions=grid_fractions(strategy),
+                dollar_volume=dollar_volume,
+            )
 
     return ReportData(
         result=result,
         net=net,
         gross=gross,
         legs=attribute_legs(result.legs),
+        names=names,
         market=market,
-        cost_sensitivity=cost_sweep(result, levels),
+        cost_sensitivity=cost_sweep(result, levels, hac_lags=lags),
         breakeven_bps=breakeven_cost_bps(result),
         grid=grid,
         yearly=_yearly_table(result),
     )
+
+
+def holding_horizon(result: BacktestResult) -> int | None:
+    """Sessions the book is held for between rebalances, taken from the run itself.
+
+    This is the bandwidth the Sharpe error bar is widened over. The autocorrelation in a
+    daily series like this one comes from carrying the same positions across a whole
+    rebalance period, so the window that matters is that horizon, not a rule of thumb
+    that knows nothing about how the book is traded. None falls back to the rule.
+    """
+    scheduled = int(result.metadata.get("rebalances_scheduled") or 0)
+    if scheduled < 1 or result.daily.empty:
+        return None
+    return max(1, round(len(result.daily) / scheduled))
 
 
 def cost_ladder(configured: float) -> tuple[float, ...]:
@@ -199,7 +241,7 @@ def grid_fractions(strategy: StrategyConfig) -> tuple[float, ...]:
 
 def significance_note(summary: PerformanceSummary) -> str:
     """One honest sentence about whether the Sharpe is distinguishable from luck."""
-    t = summary.sharpe_tstat
+    t = summary.sharpe_tstat_hac
     if t is None or not math.isfinite(t):
         return "There is not enough data here to test the Sharpe against zero."
 
@@ -213,10 +255,11 @@ def significance_note(summary: PerformanceSummary) -> str:
         verdict = "is significantly negative, which is a result but not a tradeable one"
 
     return (
-        f"Net Sharpe of {summary.sharpe:.2f} with a standard error of {summary.sharpe_se:.2f} "
-        f"over {summary.years:.1f} years gives t = {t:.2f}, so the edge {verdict}. That test "
-        "takes the sample at face value and charges nothing for the parameter combinations "
-        "tried on the way here."
+        f"Net Sharpe of {summary.sharpe:.2f} with a standard error of "
+        f"{summary.sharpe_se_hac:.2f} over {summary.years:.1f} years gives t = {t:.2f}, so the "
+        f"edge {verdict}. That error bar is adjusted for autocorrelation over "
+        f"{summary.hac_lags} sessions, and it still charges nothing for the parameter "
+        "combinations tried on the way here."
     )
 
 
@@ -248,6 +291,9 @@ def render(data: ReportData) -> str:
         net=data.net,
         gross=data.gross,
         legs=data.legs,
+        names=data.names,
+        best_names=_records(data.names.best()) if data.names is not None else [],
+        worst_names=_records(data.names.worst()) if data.names is not None else [],
         market=data.market,
         costs=_records(data.cost_sensitivity),
         breakeven=data.breakeven_bps,

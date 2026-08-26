@@ -1,7 +1,7 @@
 {
   "run": {
     "xsbt_version": "0.1.0",
-    "git_commit": "22de2f9b82be7f071bcb94d733ff42e64720829f",
+    "git_commit": "19f7575b20b56a96e930dd629f2b5d756ea0f893",
     "config_fingerprint": "f011000bef32900dcdbc792a86cda464746d46345753c22345c890b8438e5d31",
     "data_snapshot_id": "4d9fe878631df9690007e5f6b3717547556a3ea8f0f97b090f0b15343146d702",
     "strategy": "Momentum",
@@ -51,6 +51,9 @@
     "sharpe": 0.11502678256895627,
     "sharpe_se": 0.24586121492940138,
     "sharpe_tstat": 0.4678524939445451,
+    "sharpe_se_hac": 0.23576563305038717,
+    "sharpe_tstat_hac": 0.4878861311579413,
+    "hac_lags": 21,
     "sortino": 0.16126446952985074,
     "calmar": 0.018945074788953808,
     "max_drawdown": -0.3494190796880904,
@@ -86,6 +89,9 @@
     "sharpe": 0.19738658643377074,
     "sharpe_se": 0.24586749056129428,
     "sharpe_tstat": 0.8028169400645615,
+    "sharpe_se_hac": 0.23575116591764833,
+    "sharpe_tstat_hac": 0.8372666394478026,
+    "hac_lags": 21,
     "sortino": 0.2778389753888636,
     "calmar": 0.04664846666358123,
     "max_drawdown": -0.3379876200966666,
@@ -122,6 +128,293 @@
     "long_share_of_pnl": null,
     "correlation": -0.49075927286476995
   },
+  "names": {
+    "concentration": 0.2935265544611469,
+    "concentration_names": 3,
+    "names_held": 40,
+    "contributions": [
+      {
+        "ticker": "NVDA",
+        "contribution": 0.2775714898725582,
+        "share_of_gross": 0.15621807382941988,
+        "sessions_held": 2629,
+        "avg_abs_weight": 0.06621936410006916
+      },
+      {
+        "ticker": "AVGO",
+        "contribution": 0.12414017448387198,
+        "share_of_gross": 0.06986646557837221,
+        "sessions_held": 1974,
+        "avg_abs_weight": 0.06465827106886174
+      },
+      {
+        "ticker": "NFLX",
+        "contribution": 0.1198323608752737,
+        "share_of_gross": 0.06744201505335481,
+        "sessions_held": 2956,
+        "avg_abs_weight": 0.06563836193958161
+      },
+      {
+        "ticker": "TSLA",
+        "contribution": 0.08340469532681025,
+        "share_of_gross": 0.04694041473159252,
+        "sessions_held": 2698,
+        "avg_abs_weight": 0.0651067810066091
+      },
+      {
+        "ticker": "META",
+        "contribution": 0.07930887087325779,
+        "share_of_gross": 0.044635272344054185,
+        "sessions_held": 1923,
+        "avg_abs_weight": 0.06374138999775279
+      },
+      {
+        "ticker": "BA",
+        "contribution": 0.0714823129245748,
+        "share_of_gross": 0.040230461864350565,
+        "sessions_held": 1862,
+        "avg_abs_weight": 0.06350757728652517
+      },
+      {
+        "ticker": "GS",
+        "contribution": 0.050006321155888364,
+        "share_of_gross": 0.028143708757174358,
+        "sessions_held": 1766,
+        "avg_abs_weight": 0.06510180545491898
+      },
+      {
+        "ticker": "MRK",
+        "contribution": 0.04486233819179902,
+        "share_of_gross": 0.025248659590452166,
+        "sessions_held": 1668,
+        "avg_abs_weight": 0.06400535472001104
+      },
+      {
+        "ticker": "ADBE",
+        "contribution": 0.034758002288784985,
+        "share_of_gross": 0.01956190879043652,
+        "sessions_held": 1973,
+        "avg_abs_weight": 0.06428216531557297
+      },
+      {
+        "ticker": "MSFT",
+        "contribution": 0.0342753795953164,
+        "share_of_gross": 0.01929028727918317,
+        "sessions_held": 1454,
+        "avg_abs_weight": 0.06515423157968997
+      },
+      {
+        "ticker": "CAT",
+        "contribution": 0.029111078019517136,
+        "share_of_gross": 0.016383802736350594,
+        "sessions_held": 2091,
+        "avg_abs_weight": 0.06554021684771827
+      },
+      {
+        "ticker": "BLK",
+        "contribution": 0.024398748662954738,
+        "share_of_gross": 0.013731689525191921,
+        "sessions_held": 801,
+        "avg_abs_weight": 0.0657274828451981
+      },
+      {
+        "ticker": "AMZN",
+        "contribution": 0.02185751900266974,
+        "share_of_gross": 0.012301477788135704,
+        "sessions_held": 2103,
+        "avg_abs_weight": 0.0648221632326569
+      },
+      {
+        "ticker": "GOOGL",
+        "contribution": 0.02129131638039855,
+        "share_of_gross": 0.011982817240220708,
+        "sessions_held": 1406,
+        "avg_abs_weight": 0.06514300326794699
+      },
+      {
+        "ticker": "AAPL",
+        "contribution": 0.01854357230949032,
+        "share_of_gross": 0.010436378568401156,
+        "sessions_held": 2054,
+        "avg_abs_weight": 0.0651754556459346
+      },
+      {
+        "ticker": "HD",
+        "contribution": 0.01527815680892873,
+        "share_of_gross": 0.008598592850622025,
+        "sessions_held": 1107,
+        "avg_abs_weight": 0.06574554305133902
+      },
+      {
+        "ticker": "CSCO",
+        "contribution": 0.010608340417668453,
+        "share_of_gross": 0.005970406064887386,
+        "sessions_held": 1444,
+        "avg_abs_weight": 0.0655247368259753
+      },
+      {
+        "ticker": "XOM",
+        "contribution": 0.006423494959908604,
+        "share_of_gross": 0.0036151623869967037,
+        "sessions_held": 1679,
+        "avg_abs_weight": 0.06367130409923821
+      },
+      {
+        "ticker": "AXP",
+        "contribution": 0.0005894912948635478,
+        "share_of_gross": 0.00033176748327097674,
+        "sessions_held": 1149,
+        "avg_abs_weight": 0.06464858515656162
+      },
+      {
+        "ticker": "PG",
+        "contribution": -0.004262014404773343,
+        "share_of_gross": 0.0023986745946156956,
+        "sessions_held": 1114,
+        "avg_abs_weight": 0.06369101768340228
+      },
+      {
+        "ticker": "UNH",
+        "contribution": -0.004814576838694896,
+        "share_of_gross": 0.0027096584032819003,
+        "sessions_held": 1435,
+        "avg_abs_weight": 0.06439304893067739
+      },
+      {
+        "ticker": "DIS",
+        "contribution": -0.0078038178826996905,
+        "share_of_gross": 0.004392012301806116,
+        "sessions_held": 1743,
+        "avg_abs_weight": 0.0637787790605695
+      },
+      {
+        "ticker": "PEP",
+        "contribution": -0.011918215354044843,
+        "share_of_gross": 0.006707607639919837,
+        "sessions_held": 873,
+        "avg_abs_weight": 0.0638906323704023
+      },
+      {
+        "ticker": "ABBV",
+        "contribution": -0.012186767438080792,
+        "share_of_gross": 0.006858749564871258,
+        "sessions_held": 1168,
+        "avg_abs_weight": 0.06284966029246819
+      },
+      {
+        "ticker": "HON",
+        "contribution": -0.0144484570809587,
+        "share_of_gross": 0.008131635334849126,
+        "sessions_held": 517,
+        "avg_abs_weight": 0.06578745735965087
+      },
+      {
+        "ticker": "ORCL",
+        "contribution": -0.01754473256834773,
+        "share_of_gross": 0.009874228541764007,
+        "sessions_held": 1400,
+        "avg_abs_weight": 0.0644996242159679
+      },
+      {
+        "ticker": "NKE",
+        "contribution": -0.019648001653973134,
+        "share_of_gross": 0.01105795474308325,
+        "sessions_held": 1947,
+        "avg_abs_weight": 0.06396069564036179
+      },
+      {
+        "ticker": "MCD",
+        "contribution": -0.020659452114730626,
+        "share_of_gross": 0.011627202120852345,
+        "sessions_held": 1497,
+        "avg_abs_weight": 0.06532806761602421
+      },
+      {
+        "ticker": "BAC",
+        "contribution": -0.02214258036073294,
+        "share_of_gross": 0.01246191118243091,
+        "sessions_held": 1720,
+        "avg_abs_weight": 0.06602591840619348
+      },
+      {
+        "ticker": "NEE",
+        "contribution": -0.026548985136342348,
+        "share_of_gross": 0.014941849114365155,
+        "sessions_held": 1240,
+        "avg_abs_weight": 0.06466244789485857
+      },
+      {
+        "ticker": "LIN",
+        "contribution": -0.02742487696485788,
+        "share_of_gross": 0.015434803684002144,
+        "sessions_held": 503,
+        "avg_abs_weight": 0.06541426291117633
+      },
+      {
+        "ticker": "PFE",
+        "contribution": -0.03240101956572858,
+        "share_of_gross": 0.01823539178678407,
+        "sessions_held": 1417,
+        "avg_abs_weight": 0.06302091440940344
+      },
+      {
+        "ticker": "WMT",
+        "contribution": -0.037845701022551775,
+        "share_of_gross": 0.021299674974478155,
+        "sessions_held": 1357,
+        "avg_abs_weight": 0.06460041682805251
+      },
+      {
+        "ticker": "JNJ",
+        "contribution": -0.04113023737106031,
+        "share_of_gross": 0.02314822196330003,
+        "sessions_held": 1025,
+        "avg_abs_weight": 0.06481249262554173
+      },
+      {
+        "ticker": "KO",
+        "contribution": -0.04119945121869356,
+        "share_of_gross": 0.023187175726038973,
+        "sessions_held": 1178,
+        "avg_abs_weight": 0.06423854482762491
+      },
+      {
+        "ticker": "CVX",
+        "contribution": -0.04479900677723275,
+        "share_of_gross": 0.025213016478830806,
+        "sessions_held": 1544,
+        "avg_abs_weight": 0.06362190146501098
+      },
+      {
+        "ticker": "UPS",
+        "contribution": -0.04819271502785202,
+        "share_of_gross": 0.027123005744277933,
+        "sessions_held": 1198,
+        "avg_abs_weight": 0.06333336669942019
+      },
+      {
+        "ticker": "JPM",
+        "contribution": -0.07248370360848781,
+        "share_of_gross": 0.04079404756929252,
+        "sessions_held": 1254,
+        "avg_abs_weight": 0.06548810696039241
+      },
+      {
+        "ticker": "CRM",
+        "contribution": -0.09427605303344075,
+        "share_of_gross": 0.05305884772202746,
+        "sessions_held": 1890,
+        "avg_abs_weight": 0.06489435573574162
+      },
+      {
+        "ticker": "COP",
+        "contribution": -0.10734655961061987,
+        "share_of_gross": 0.06041496834666064,
+        "sessions_held": 2101,
+        "avg_abs_weight": 0.06338265215581616
+      }
+    ]
+  },
   "market": {
     "beta": 0.004297201267998001,
     "alpha": 0.012011907236836393,
@@ -137,7 +430,7 @@
       "cagr": 0.01576660422878251,
       "ann_volatility": 0.10983534351344973,
       "sharpe": 0.19738658643377074,
-      "sharpe_tstat": 0.8028169400645615,
+      "sharpe_tstat": 0.8372666394478026,
       "max_drawdown": -0.3379876200966666
     },
     {
@@ -145,7 +438,7 @@
       "cagr": 0.011183793502600459,
       "ann_volatility": 0.10984456938990626,
       "sharpe": 0.1562117716781484,
-      "sharpe_tstat": 0.6353586132393483,
+      "sharpe_tstat": 0.6625525290312058,
       "max_drawdown": -0.3437270405079239
     },
     {
@@ -153,7 +446,7 @@
       "cagr": 0.006619770597378283,
       "ann_volatility": 0.10987011702048119,
       "sharpe": 0.11502678256895627,
-      "sharpe_tstat": 0.4678524939445451,
+      "sharpe_tstat": 0.4878861311579413,
       "max_drawdown": -0.3494190796880904
     },
     {
@@ -161,7 +454,7 @@
       "cagr": -0.0024521889885615877,
       "ann_volatility": 0.10997012477526072,
       "sharpe": 0.03269968642965354,
-      "sharpe_tstat": 0.13300219381729358,
+      "sharpe_tstat": 0.13875422342033047,
       "max_drawdown": -0.360662497723075
     },
     {
@@ -169,7 +462,7 @@
       "cagr": -0.029224327341826783,
       "ann_volatility": 0.11065920805678887,
       "sharpe": -0.21263538940946627,
-      "sharpe_tstat": -0.8648319878318886,
+      "sharpe_tstat": -0.9060025047868497,
       "max_drawdown": -0.4875735612908475
     }
   ],
