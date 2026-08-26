@@ -12,17 +12,19 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from xsbt.analytics.attribution import attribute_legs, fit_market
+from xsbt.analytics.attribution import attribute_legs, attribute_names, fit_market
 from xsbt.analytics.metrics import (
     TRADING_DAYS,
     annualised_volatility,
     cagr,
     calmar_ratio,
     conditional_value_at_risk,
+    default_hac_lags,
     equity_curve,
     hit_rate,
     max_drawdown,
     monthly_returns,
+    newey_west_factor,
     rolling_sharpe,
     sharpe_ratio,
     sharpe_standard_error,
@@ -126,6 +128,74 @@ def test_a_drifting_series_is_far_more_significant_than_a_flat_one() -> None:
 
     assert sharpe_tstat(drifting) > 2.0
     assert sharpe_tstat(drifting) > abs(sharpe_tstat(flat)) + 2.0
+
+
+def test_a_series_with_no_memory_needs_no_correction() -> None:
+    """White noise has nothing for the Bartlett weights to pick up, so f sits near 1."""
+    rng = np.random.default_rng(11)
+
+    factor = newey_west_factor(series(rng.normal(0.0, 0.01, 4000)), lags=21)
+
+    assert factor == pytest.approx(1.0, abs=0.15)
+
+
+def test_a_repeating_series_widens_the_error_bar() -> None:
+    """Each value held for a stretch, so neighbouring days repeat each other.
+
+    That is what monthly rebalancing does to a daily series, and the point of the whole
+    correction: the effective sample is smaller than the session count claims.
+    """
+    rng = np.random.default_rng(3)
+    held = series(np.repeat(rng.normal(0.001, 0.01, 200), 21))
+
+    assert newey_west_factor(held, lags=21) > 2.0
+    assert sharpe_standard_error(held, hac_lags=21) > sharpe_standard_error(held)
+    assert abs(sharpe_tstat(held, hac_lags=21)) < abs(sharpe_tstat(held))
+
+
+def test_an_alternating_series_tightens_it_instead() -> None:
+    """The correction is not a one-way safety margin. Negative autocorrelation means the
+    iid bar was the conservative one, and the estimator has to be allowed to say so."""
+    zigzag = series([0.01, -0.01] * 500)
+
+    assert newey_west_factor(zigzag, lags=4) < 1.0
+    assert sharpe_standard_error(zigzag, hac_lags=4) < sharpe_standard_error(zigzag)
+
+
+def test_the_correction_is_worked_out_by_hand_at_one_lag() -> None:
+    """Four returns, one lag. rho_1 and the Bartlett weight are small enough to check."""
+    sample = series([0.02, -0.01, 0.03, 0.00])
+    centred = np.array([0.02, -0.01, 0.03, 0.00]) - 0.01
+
+    variance = float(centred @ centred) / 4
+    autocovariance = float(centred[1:] @ centred[:-1]) / 4
+    expected = 1.0 + 2.0 * (1.0 - 1.0 / 2.0) * autocovariance / variance
+
+    assert newey_west_factor(sample, lags=1) == pytest.approx(expected)
+
+
+def test_zero_lags_leaves_the_iid_error_bar_alone() -> None:
+    sample = series([0.01, -0.004, 0.02, 0.0, -0.01] * 40)
+
+    assert newey_west_factor(sample, lags=0) == 1.0
+    assert sharpe_standard_error(sample, hac_lags=0) == pytest.approx(sharpe_standard_error(sample))
+
+
+def test_the_automatic_bandwidth_grows_slowly_with_the_sample() -> None:
+    """Newey-West (1994): floor(4 * (n / 100) ** (2/9)). Slow growth is the point, so a
+    long sample does not spend its degrees of freedom estimating autocovariances."""
+    assert default_hac_lags(100) == 4
+    assert default_hac_lags(4000) == 9
+    assert default_hac_lags(2) == 0
+
+
+def test_summary_reports_both_error_bars() -> None:
+    summary = summarise(series([0.01, -0.004, 0.02, 0.0, -0.01] * 60), hac_lags=5)
+
+    assert summary.hac_lags == 5
+    assert math.isfinite(summary.sharpe_se)
+    assert math.isfinite(summary.sharpe_se_hac)
+    assert summary.sharpe_tstat_hac == pytest.approx(summary.sharpe / summary.sharpe_se_hac)
 
 
 def test_max_drawdown_peak_trough_and_recovery() -> None:
@@ -275,6 +345,68 @@ def test_leg_attribution_needs_both_legs() -> None:
 
     with pytest.raises(KeyError, match="expected long and short"):
         attribute_legs(frame)
+
+
+def name_panels() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Three names over two sessions, small enough to total in your head.
+
+    AAA: 0.5 * 0.10 + 0.5 * -0.02  =  0.040
+    BBB: -0.5 * 0.04 + -0.5 * 0.06 = -0.050
+    CCC: never held                =  0.000
+    """
+    index = pd.bdate_range("2020-01-01", periods=2, name="date")
+    weights = pd.DataFrame({"AAA": [0.5, 0.5], "BBB": [-0.5, -0.5], "CCC": [0.0, 0.0]}, index=index)
+    returns = pd.DataFrame(
+        {"AAA": [0.10, -0.02], "BBB": [0.04, 0.06], "CCC": [0.20, 0.20]}, index=index
+    )
+    return weights, returns
+
+
+def test_name_attribution_totals_each_name_by_hand() -> None:
+    split = attribute_names(*name_panels())
+
+    assert split.table.loc["AAA", "contribution"] == pytest.approx(0.04)
+    assert split.table.loc["BBB", "contribution"] == pytest.approx(-0.05)
+    assert split.table.loc["AAA", "sessions_held"] == 2
+
+
+def test_a_name_never_held_is_left_out_however_well_it_did() -> None:
+    """CCC returned 20% a day throughout. We did not own it, so it contributed nothing
+    and does not belong in a table about where our P&L came from."""
+    split = attribute_names(*name_panels())
+
+    assert "CCC" not in split.table.index
+    assert split.names_held == 2
+
+
+def test_name_contributions_add_up_to_gross_pnl() -> None:
+    """The decomposition has to be exhaustive, or it is decoration rather than attribution."""
+    weights, returns = name_panels()
+
+    split = attribute_names(weights, returns)
+
+    assert split.table["contribution"].sum() == pytest.approx(
+        float((weights * returns).sum().sum())
+    )
+
+
+def test_concentration_stays_readable_when_the_legs_offset() -> None:
+    """Measured on absolute contributions on purpose. Against the net, this book nets
+    -0.01 out of 0.09 traded either way, and the share would read as several hundred
+    percent: the same trap that made the leg split unreadable."""
+    split = attribute_names(*name_panels())
+
+    assert 0.0 <= split.concentration <= 1.0
+    assert split.concentration == pytest.approx(1.0)
+    assert split.table["share_of_gross"].sum() == pytest.approx(1.0)
+
+
+def test_name_attribution_on_a_book_that_never_traded() -> None:
+    index = pd.bdate_range("2020-01-01", periods=2, name="date")
+    flat = pd.DataFrame({"AAA": [0.0, 0.0]}, index=index)
+
+    with pytest.raises(ValueError, match="no name ever carried a position"):
+        attribute_names(flat, flat)
 
 
 def test_market_fit_recovers_an_exact_relationship() -> None:

@@ -72,12 +72,58 @@ def sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
     return float(excess.mean() / sigma * math.sqrt(TRADING_DAYS))
 
 
-def sharpe_standard_error(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+def default_hac_lags(n: int) -> int:
+    """Newey-West (1994) automatic bandwidth, ``floor(4 * (n / 100) ** (2/9))``.
+
+    The fallback when the caller has nothing better. A caller who knows how long the book
+    is held for does have something better, and should pass it.
+    """
+    if n < 3:
+        return 0
+    return max(1, min(int(4.0 * (n / 100.0) ** (2.0 / 9.0)), n - 2))
+
+
+def newey_west_factor(returns: pd.Series, lags: int) -> float:
+    """How much autocorrelation inflates the variance of the sample mean.
+
+        f = 1 + 2 * sum_k (1 - k / (lags + 1)) * rho_k
+
+    The Bartlett weights are what keep the estimate from going negative. Above 1 means
+    the series repeats itself, so the effective sample is smaller than the session count
+    suggests and every error bar built on that count is too tight. Below 1 means it
+    alternates, and the iid bar was the conservative one.
+    """
+    sample = returns.dropna()
+    n = len(sample)
+    if lags < 1 or n < 3:
+        return 1.0
+
+    centred = sample.to_numpy(dtype=float) - float(sample.mean())
+    variance = float(centred @ centred) / n
+    if not variance > FLAT_VOL**2:
+        return 1.0
+
+    factor = 1.0
+    for k in range(1, min(lags, n - 1) + 1):
+        autocovariance = float(centred[k:] @ centred[:-k]) / n
+        factor += 2.0 * (1.0 - k / (lags + 1.0)) * autocovariance / variance
+    return max(factor, 0.0)
+
+
+def sharpe_standard_error(
+    returns: pd.Series,
+    risk_free_rate: float = 0.0,
+    *,
+    hac_lags: int | None = None,
+) -> float:
     """Standard error of the annualised Sharpe, following Lo (2002).
 
-    Assumes returns are iid. They are not: monthly rebalancing leaves autocorrelation in
-    the daily series, which makes this optimistic. It is still the right order of
-    magnitude, and a Sharpe reported without one is a number with no scale on it.
+    The base result assumes returns are iid. They are not: holding one book across a
+    whole rebalance period leaves the daily returns correlated with each other. Pass
+    ``hac_lags`` to rescale the bar by the Newey-West factor over that many lags. Usually
+    that widens it, but a series that alternates day to day gets a tighter bar, and the
+    estimator is allowed to say so. A Sharpe quoted without an error bar is a number with
+    no scale on it, and one quoted with the wrong error bar is worse.
     """
     sample = returns.dropna()
     n = len(sample)
@@ -86,14 +132,23 @@ def sharpe_standard_error(returns: pd.Series, risk_free_rate: float = 0.0) -> fl
     sharpe = sharpe_ratio(sample, risk_free_rate)
     if not math.isfinite(sharpe):
         return float("nan")
+
     per_period = sharpe / math.sqrt(TRADING_DAYS)
-    return float(math.sqrt(TRADING_DAYS * (1.0 + 0.5 * per_period**2) / n))
+    iid = math.sqrt(TRADING_DAYS * (1.0 + 0.5 * per_period**2) / n)
+    if hac_lags is None:
+        return float(iid)
+    return float(iid * math.sqrt(newey_west_factor(sample, hac_lags)))
 
 
-def sharpe_tstat(returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+def sharpe_tstat(
+    returns: pd.Series,
+    risk_free_rate: float = 0.0,
+    *,
+    hac_lags: int | None = None,
+) -> float:
     """How many standard errors the Sharpe sits above zero. Below ~2, treat it as luck."""
     sharpe = sharpe_ratio(returns, risk_free_rate)
-    error = sharpe_standard_error(returns, risk_free_rate)
+    error = sharpe_standard_error(returns, risk_free_rate, hac_lags=hac_lags)
     if not math.isfinite(sharpe) or not math.isfinite(error) or error == 0.0:
         return float("nan")
     return float(sharpe / error)
@@ -235,6 +290,11 @@ class PerformanceSummary:
     sharpe: float
     sharpe_se: float
     sharpe_tstat: float
+    #: The same Sharpe with the error bar rescaled for autocorrelation. This is the pair
+    #: the verdict is keyed to; the iid pair above is kept so the gap is visible.
+    sharpe_se_hac: float
+    sharpe_tstat_hac: float
+    hac_lags: int
     sortino: float
     calmar: float
 
@@ -280,6 +340,7 @@ def summarise(
     risk_free_rate: float = 0.0,
     turnover: pd.Series | None = None,
     costs: pd.Series | None = None,
+    hac_lags: int | None = None,
 ) -> PerformanceSummary:
     """Roll the whole metric set up for one return series.
 
@@ -288,6 +349,8 @@ def summarise(
         risk_free_rate: annualised hurdle for Sharpe and Sortino. Not credited to P&L.
         turnover: daily notional traded as a fraction of NAV, if you have it.
         costs: daily cost drag as a fraction of NAV, if you have it.
+        hac_lags: bandwidth for the autocorrelation-adjusted Sharpe error bar. Defaults
+            to the Newey-West automatic rule; pass the holding horizon if you know it.
     """
     if returns.empty:
         raise ValueError("no returns to summarise")
@@ -296,6 +359,7 @@ def summarise(
     span = max(years(sample), 1e-9)
     drawdown = max_drawdown(sample)
     monthly = monthly_returns(sample)
+    lags = default_hac_lags(len(sample)) if hac_lags is None else max(0, int(hac_lags))
 
     traded = turnover[turnover > 0.0] if turnover is not None else pd.Series(dtype="float64")
 
@@ -310,6 +374,9 @@ def summarise(
         sharpe=sharpe_ratio(sample, risk_free_rate),
         sharpe_se=sharpe_standard_error(sample, risk_free_rate),
         sharpe_tstat=sharpe_tstat(sample, risk_free_rate),
+        sharpe_se_hac=sharpe_standard_error(sample, risk_free_rate, hac_lags=lags),
+        sharpe_tstat_hac=sharpe_tstat(sample, risk_free_rate, hac_lags=lags),
+        hac_lags=lags,
         sortino=sortino_ratio(sample, risk_free_rate),
         calmar=calmar_ratio(sample),
         max_drawdown=drawdown.depth,

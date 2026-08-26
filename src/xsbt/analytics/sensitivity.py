@@ -38,11 +38,15 @@ def cost_sweep(
     levels: Sequence[float] = DEFAULT_COST_LEVELS,
     *,
     risk_free_rate: float | None = None,
+    hac_lags: int | None = None,
 ) -> pd.DataFrame:
     """Headline numbers across a range of assumed transaction costs.
 
     The question this answers is not 'what is the Sharpe' but 'how wrong does my cost
     assumption have to be before this stops being worth trading'.
+
+    ``hac_lags`` has to match whatever the headline block used, or the row at the
+    configured cost level quietly disagrees with the card at the top of the page.
     """
     hurdle = result.config.portfolio.risk_free_rate if risk_free_rate is None else risk_free_rate
 
@@ -55,7 +59,7 @@ def cost_sweep(
                 "cagr": cagr(net),
                 "ann_volatility": annualised_volatility(net),
                 "sharpe": sharpe_ratio(net, hurdle),
-                "sharpe_tstat": sharpe_tstat(net, hurdle),
+                "sharpe_tstat": sharpe_tstat(net, hurdle, hac_lags=hac_lags),
                 "max_drawdown": max_drawdown(net).depth,
             }
         )
