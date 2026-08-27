@@ -1,7 +1,7 @@
 {
   "run": {
     "xsbt_version": "0.1.0",
-    "git_commit": "19f7575b20b56a96e930dd629f2b5d756ea0f893",
+    "git_commit": "800eecb4ed48bed3f2f8290159578d5bde55f625",
     "config_fingerprint": "f011000bef32900dcdbc792a86cda464746d46345753c22345c890b8438e5d31",
     "data_snapshot_id": "4d9fe878631df9690007e5f6b3717547556a3ea8f0f97b090f0b15343146d702",
     "strategy": "Momentum",
@@ -569,6 +569,13 @@
       "sharpe": 0.08416928025776842
     }
   ],
+  "search_deflation": {
+    "trials": 20,
+    "sharpe_spread": 0.13646875019368468,
+    "expected_max_sharpe": 0.25938723858089713,
+    "probabilistic": 0.6799213154182391,
+    "deflated": 0.27870483231801363
+  },
   "yearly_returns": [
     {
       "year": 2010,

@@ -26,7 +26,13 @@ from xsbt.analytics.attribution import (
     attribute_names,
     fit_market,
 )
-from xsbt.analytics.metrics import PerformanceSummary, summarise, yearly_returns
+from xsbt.analytics.metrics import (
+    PerformanceSummary,
+    SearchDeflation,
+    deflate,
+    summarise,
+    yearly_returns,
+)
 from xsbt.analytics.sensitivity import (
     DEFAULT_COST_LEVELS,
     breakeven_cost_bps,
@@ -79,8 +85,9 @@ CAVEATS: tuple[tuple[str, str], ...] = (
         "The Sharpe standard error starts from Lo (2002) and is then rescaled by a "
         "Newey-West factor over one holding period, because carrying the same book for a "
         "month leaves the daily returns correlated. Both bars are shown, so the size of "
-        "that adjustment is visible. Neither is corrected for the parameters searched, so "
-        "treat borderline t-statistics as generous.",
+        "that adjustment is visible. The deflated Sharpe then charges for the parameter "
+        "grid on top of that, though it treats neighbouring cells as separate tries when "
+        "they are close to the same strategy, so read it as a floor on the penalty.",
     ),
 )
 
@@ -101,6 +108,8 @@ class ReportData:
     breakeven_bps: float
     #: None when the report was generated without prices to re-run on.
     grid: pd.DataFrame | None
+    #: None when there is no grid, so nothing to charge the search against.
+    deflation: SearchDeflation | None
     yearly: pd.DataFrame
 
     def as_dict(self) -> dict[str, Any]:
@@ -121,6 +130,7 @@ class ReportData:
             "cost_sensitivity": _records(self.cost_sensitivity),
             "breakeven_cost_bps": _json_value(self.breakeven_bps),
             "parameter_grid": _grid_records(self.grid),
+            "search_deflation": (self.deflation.as_dict() if self.deflation is not None else None),
             "yearly_returns": _records(self.yearly),
         }
 
@@ -190,6 +200,14 @@ def analyse(
                 dollar_volume=dollar_volume,
             )
 
+    # Only meaningful with a grid, because the grid is where the count of configurations
+    # tried and the spread between them comes from. No grid, no search to charge for.
+    deflation = None
+    if grid is not None:
+        deflation = deflate(
+            result.returns, grid.to_numpy(dtype=float).ravel(), risk_free_rate=hurdle
+        )
+
     return ReportData(
         result=result,
         net=net,
@@ -200,6 +218,7 @@ def analyse(
         cost_sensitivity=cost_sweep(result, levels, hac_lags=lags),
         breakeven_bps=breakeven_cost_bps(result),
         grid=grid,
+        deflation=deflation,
         yearly=_yearly_table(result),
     )
 
@@ -239,7 +258,10 @@ def grid_fractions(strategy: StrategyConfig) -> tuple[float, ...]:
     return tuple(sorted({0.1, 0.2, 0.3, 0.4, round(strategy.top_fraction, 4)}))
 
 
-def significance_note(summary: PerformanceSummary) -> str:
+def significance_note(
+    summary: PerformanceSummary,
+    deflation: SearchDeflation | None = None,
+) -> str:
     """One honest sentence about whether the Sharpe is distinguishable from luck."""
     t = summary.sharpe_tstat_hac
     if t is None or not math.isfinite(t):
@@ -254,12 +276,17 @@ def significance_note(summary: PerformanceSummary) -> str:
     else:
         verdict = "is significantly negative, which is a result but not a tradeable one"
 
-    return (
+    note = (
         f"Net Sharpe of {summary.sharpe:.2f} with a standard error of "
         f"{summary.sharpe_se_hac:.2f} over {summary.years:.1f} years gives t = {t:.2f}, so the "
         f"edge {verdict}. That error bar is adjusted for autocorrelation over "
-        f"{summary.hac_lags} sessions, and it still charges nothing for the parameter "
-        "combinations tried on the way here."
+        f"{summary.hac_lags} sessions"
+    )
+    if deflation is None or not math.isfinite(deflation.deflated):
+        return f"{note}, and it still charges nothing for the parameter combinations tried."
+    return (
+        f"{note}. Charging for the {deflation.trials} configurations searched on the way "
+        f"here leaves a {deflation.deflated:.0%} chance the true Sharpe is above zero."
     )
 
 
@@ -300,7 +327,8 @@ def render(data: ReportData) -> str:
         yearly=_records(data.yearly),
         has_benchmark=result.benchmark is not None,
         figures=figures,
-        verdict=significance_note(data.net),
+        deflation=data.deflation,
+        verdict=significance_note(data.net, data.deflation),
         caveats=CAVEATS,
     )
 

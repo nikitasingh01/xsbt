@@ -7,6 +7,7 @@ asserted. Re-deriving the implementation in the test would prove nothing.
 from __future__ import annotations
 
 import math
+from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
@@ -20,11 +21,14 @@ from xsbt.analytics.metrics import (
     calmar_ratio,
     conditional_value_at_risk,
     default_hac_lags,
+    deflate,
     equity_curve,
+    expected_max_sharpe,
     hit_rate,
     max_drawdown,
     monthly_returns,
     newey_west_factor,
+    probabilistic_sharpe_ratio,
     rolling_sharpe,
     sharpe_ratio,
     sharpe_standard_error,
@@ -196,6 +200,103 @@ def test_summary_reports_both_error_bars() -> None:
     assert math.isfinite(summary.sharpe_se)
     assert math.isfinite(summary.sharpe_se_hac)
     assert summary.sharpe_tstat_hac == pytest.approx(summary.sharpe / summary.sharpe_se_hac)
+
+
+def test_the_probabilistic_sharpe_matches_the_iid_bar_on_a_normal_series() -> None:
+    """A consistency check between the two ways this repo scores a Sharpe.
+
+    Set skew to zero and kurtosis to 3 and the PSR denominator collapses to Lo's
+    sqrt(1 + SR^2 / 2), so the z-score it computes should be the same t-statistic the
+    error bar gives, up to sqrt(n - 1) against sqrt(n). If these two ever drift apart,
+    one of them has picked up a units bug, which on this formula means a stray sqrt(252).
+    """
+    rng = np.random.default_rng(11)
+    sample = series(rng.normal(0.0004, 0.01, 3000))
+
+    z = NormalDist().inv_cdf(probabilistic_sharpe_ratio(sample))
+
+    assert z == pytest.approx(sharpe_tstat(sample), rel=0.02)
+
+
+def test_a_left_tail_is_charged_for_where_the_plain_t_stat_ignores_it() -> None:
+    """Same mean and roughly the same volatility, but one of them crashes occasionally.
+
+    The t-stat cannot tell them apart, because it only reads the first two moments. The
+    PSR should prefer the one without the left tail, which is the whole reason for using
+    it: a mean earned between crashes is worth less than the same mean earned steadily.
+    """
+    steady = np.full(1200, 0.0006)
+    steady[::3] = -0.0004
+    crashy = steady.copy()
+    crashy[::200] = -0.05
+    crashy[1::200] = 0.05 + float(steady[1])
+
+    assert probabilistic_sharpe_ratio(series(crashy)) < probabilistic_sharpe_ratio(series(steady))
+
+
+def test_the_expected_best_of_many_tries_grows_with_the_number_of_tries() -> None:
+    """Search wider and the winner looks better even when nothing has any edge."""
+    assert expected_max_sharpe(5, 0.4) < expected_max_sharpe(25, 0.4)
+    assert expected_max_sharpe(25, 0.4) < expected_max_sharpe(500, 0.4)
+
+
+def test_the_expected_best_scales_with_how_far_apart_the_tries_landed() -> None:
+    """Linear in the spread, which is what lets an annualised spread go straight in.
+
+    A grid whose cells all come out in the same place has nothing to flatter its winner
+    with, so the hurdle it produces is zero.
+    """
+    assert expected_max_sharpe(25, 0.8) == pytest.approx(2.0 * expected_max_sharpe(25, 0.4))
+    assert expected_max_sharpe(25, 0.0) == 0.0
+    assert expected_max_sharpe(1, 0.4) == 0.0
+
+
+def test_charging_for_the_search_can_only_lower_the_odds() -> None:
+    """The hurdle is never below zero, so the deflated number is never the kinder one."""
+    sample = series(np.random.default_rng(3).normal(0.0006, 0.01, 2000))
+
+    deflation = deflate(sample, [0.9, 0.4, 0.1, -0.2, 0.55])
+
+    assert deflation is not None
+    assert deflation.trials == 5
+    assert deflation.expected_max_sharpe > 0.0
+    assert deflation.deflated < deflation.probabilistic
+
+
+def test_a_grid_that_disagrees_with_itself_is_charged_more() -> None:
+    """Two searches of the same width over the same returns, different spreads.
+
+    The scattered grid is the one where a good cell is more easily luck, so it should
+    take the bigger haircut. This is the property that makes the correction specific to
+    the search actually run rather than to searches in general.
+    """
+    sample = series(np.random.default_rng(5).normal(0.0006, 0.01, 2000))
+
+    tight = deflate(sample, [0.30, 0.32, 0.34, 0.36, 0.38])
+    scattered = deflate(sample, [-0.4, 0.0, 0.34, 0.7, 1.2])
+
+    assert tight is not None
+    assert scattered is not None
+    assert scattered.expected_max_sharpe > tight.expected_max_sharpe
+    assert scattered.deflated < tight.deflated
+
+
+def test_cells_that_never_ran_are_dropped_rather_than_counted() -> None:
+    """A grid cell that raised is not a trial, and NaN would poison the spread anyway."""
+    sample = series(np.random.default_rng(7).normal(0.0006, 0.01, 800))
+
+    deflation = deflate(sample, [0.4, float("nan"), 0.1, float("nan"), 0.25])
+
+    assert deflation is not None
+    assert deflation.trials == 3
+
+
+def test_there_is_no_search_to_charge_for_below_two_cells() -> None:
+    sample = series(np.random.default_rng(9).normal(0.0006, 0.01, 800))
+
+    assert deflate(sample, []) is None
+    assert deflate(sample, [0.4]) is None
+    assert deflate(sample, [0.4, float("nan")]) is None
 
 
 def test_max_drawdown_peak_trough_and_recovery() -> None:

@@ -207,7 +207,7 @@ you go looking.
 
 ---
 
-## 9. Session-counted annualisation, and an error bar that knows the holding period
+## 9. Session-counted annualisation, an error bar that knows the holding period, and a bill for the search
 
 CAGR over `len(returns) / 252` rather than calendar days, because calendar dating makes a
 backtest that ends on a Monday look different from one that ends on a Friday.
@@ -233,8 +233,28 @@ the bar rather than widening it. That is the estimator behaving correctly on a s
 alternates rather than trends, and it is why the report says "adjusted" and not "widened".
 Both bars are printed side by side so the size and the direction are visible.
 
-Still not corrected for: the parameter search. A borderline t-statistic here should be read
-as generous.
+That still leaves the parameter search uncharged, and a t-statistic which ignores the search
+is a generous one. So the report also carries a deflated Sharpe, per Bailey and Lopez de
+Prado (2014). The heatmap is already re-running the grid, so both inputs come free: the
+count of cells that produced a Sharpe, and the spread across them. From those,
+
+```
+E[max SR] = spread * ((1 - g) * Z(1 - 1/N) + g * Z(1 - 1/(N e)))
+```
+
+with `g` the Euler-Mascheroni constant, is the best Sharpe `N` tries at a strategy with no
+edge would be expected to throw up. The probabilistic Sharpe is then measured against that
+hurdle rather than against zero, which turns "is this above zero" into "is this above what
+my own search would have produced anyway".
+
+Two limits on it, both stated on the page. Neighbouring cells are close to the same strategy
+rather than independent tries, so `N` flatters the arithmetic and the penalty comes out too
+small: read it as a floor, not the whole bill. And the grid is not the only search that
+happened, since the universe and the window were picked too, and nothing charges for those.
+
+It earned its place on the first run. Momentum reports 0.12 against a 0.26 hurdle, so the
+cell I picked does not beat its own search, which is a sharper statement than t = 0.49 makes
+on its own. The report says so in as many words rather than leaving it to be inferred.
 
 There is also a `FLAT_VOL = 1e-15` floor in the metrics, because pandas gives something like
 `2e-19` for the standard deviation of a constant series rather than a clean zero, and
@@ -294,14 +314,12 @@ In rough order of what would change a decision:
 
 1. **A point-in-time universe.** Survivorship is the largest bias here by a distance and
    everything below is second order next to it.
-2. **A multiple-testing correction on the Sharpe.** The Newey-West bar handles the
-   autocorrelation; nothing yet handles the fact that the reported cell was chosen after
-   looking at twenty-five of them. Deflated Sharpe is the standard answer.
-3. **Borrow cost on the short leg**, even a crude flat rate, because the leg attribution
+2. **Borrow cost on the short leg**, even a crude flat rate, because the leg attribution
    currently compares a financed leg to an unfinanced one.
-4. **Walk-forward parameter selection**, so the grid becomes a procedure rather than a
-   diagnostic and the reported result is out-of-sample.
-5. **A capacity model.** Linear cost in turnover understates size badly, and breakeven is
+3. **Walk-forward parameter selection**, so the grid becomes a procedure rather than a
+   diagnostic and the reported result is out-of-sample. That would also retire the deflated
+   Sharpe, which exists because the selection is in-sample.
+4. **A capacity model.** Linear cost in turnover understates size badly, and breakeven is
    the number a PM will quote back at you.
-6. **Sector and size neutralisation**, which is a natural second method on the rank base
+5. **Sector and size neutralisation**, which is a natural second method on the rank base
    alongside `score`.

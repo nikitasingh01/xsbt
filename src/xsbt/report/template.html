@@ -338,6 +338,42 @@
   {{ config.strategy.lookback_days }} sessions at {{ config.strategy.top_fraction }}.
 </p>
 <figure style="max-width: 560px"><img src="{{ figures.grid }}" alt="Sharpe across the parameter grid"></figure>
+{% if deflation %}
+<h3>What the search costs</h3>
+<div class="grid2">
+  <div>
+    <p class="note">
+      The heatmap above is also the input to this. Trying
+      <strong>{{ deflation.trials }}</strong> configurations and reporting the one you liked
+      is a free option unless somebody prices it, so the deflated Sharpe asks the harder
+      question: not whether this cell beat zero, but whether it beat the best cell a
+      strategy with no edge would have thrown up across the same search.
+    </p>
+    <p class="note">
+      Neighbouring cells are close to the same strategy rather than separate tries, and the
+      arithmetic assumes otherwise, so treat this as a floor on the penalty rather than the
+      whole of it.
+    </p>
+  </div>
+  <div>
+    <dl class="kv">
+      <div><dt>Configurations searched</dt><dd>{{ deflation.trials }}</dd></div>
+      <div><dt>Spread of Sharpe across them</dt><dd>{{ deflation.sharpe_spread | num }}</dd></div>
+      <div><dt>Best Sharpe expected from noise</dt><dd>{{ deflation.expected_max_sharpe | num }}</dd></div>
+      <div><dt>P(true Sharpe &gt; 0), search free</dt><dd>{{ deflation.probabilistic | pct(0) }}</dd></div>
+      <div><dt>P(true Sharpe &gt; 0), search charged</dt><dd><strong>{{ deflation.deflated | pct(0) }}</strong></dd></div>
+    </dl>
+  </div>
+</div>
+{% if net.sharpe < deflation.expected_max_sharpe %}
+<p class="note">
+  Worth reading twice. The Sharpe this run reports, {{ net.sharpe | num }}, is below the
+  {{ deflation.expected_max_sharpe | num }} that searching this grid would be expected to
+  throw up from a strategy with no edge at all. The chosen cell is not beating its own
+  search, which is a stronger statement against it than the t-statistic alone makes.
+</p>
+{% endif %}
+{% endif %}
 {% else %}
 <p class="note">
   Skipped: regenerating this section needs the price panel, which was not available. Re-run

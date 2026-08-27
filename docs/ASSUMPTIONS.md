@@ -84,19 +84,23 @@ rebate without borrow data is worse than leaving it out.
 
 ## Statistics
 
-**The Sharpe error bar is adjusted for autocorrelation, not for the search.** The base
-result is Lo (2002), `SE = sqrt(252 * (1 + SR_period^2 / 2) / T)`, which is derived for iid
-returns. A book carried for a month is not iid, so the bar is rescaled by a Newey-West
-factor over the run's own holding horizon, and both versions are on the report. On these two
-runs the factor came out below 1, so the adjusted bar is the tighter of the two. That is the
-estimator doing its job on a series that alternates rather than trends, and not a sign that
-the correction was skipped.
+**The Sharpe error bar is adjusted for autocorrelation.** The base result is Lo (2002),
+`SE = sqrt(252 * (1 + SR_period^2 / 2) / T)`, which is derived for iid returns. A book
+carried for a month is not iid, so the bar is rescaled by a Newey-West factor over the run's
+own holding horizon, and both versions are on the report. On these two runs the factor came
+out below 1, so the adjusted bar is the tighter of the two. That is the estimator doing its
+job on a series that alternates rather than trends, and not a sign that the correction was
+skipped.
 
-**Nothing is charged for the parameter search.** The grid is 25 configurations and the
-t-stat on the chosen cell takes the sample at face value. That is why the grid is a
-robustness check and not a selection procedure: it answers "is this cell surrounded by
-good cells", not "which cell is best". Every cell is scored in-sample. A borderline t-stat
-should be read as generous for that reason.
+**The search is charged, but only the part of it I can count.** The report carries a
+deflated Sharpe (Bailey and Lopez de Prado, 2014) driven off the same grid the heatmap
+plots, so the chosen cell is measured against the best cell the search would be expected to
+produce from noise. Two caveats, both repeated on the page. Neighbouring cells are close to
+the same strategy rather than independent tries, and the arithmetic assumes independence, so
+the penalty is a floor rather than the whole of it. And the grid is not the only search
+here: the universe, the sample window and the two strategies were all chosen as well, and
+nothing charges for those. Every cell is still scored in-sample, so the grid remains a
+robustness check rather than a selection procedure.
 
 **Annualisation is by session count**, 252 throughout, with CAGR over `len(returns) / 252`.
 Calendar dating makes a run that ends on a Monday look different from one that ends on a

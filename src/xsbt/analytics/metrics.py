@@ -8,7 +8,9 @@ benchmark. Annualisation uses 252 sessions throughout.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
+from statistics import NormalDist
 from typing import Any
 
 import numpy as np
@@ -20,6 +22,9 @@ TRADING_DAYS = 252
 #: rather than risk. pandas returns ~2e-19 for a flat series instead of a clean zero, and
 #: dividing by that hands a PM a Sharpe ratio of 7e16.
 FLAT_VOL = 1e-15
+
+#: Euler-Mascheroni, which turns up in the expected maximum of a set of normal draws.
+EULER_MASCHERONI = 0.5772156649015329
 
 
 def daily_risk_free(annual_rate: float) -> float:
@@ -152,6 +157,132 @@ def sharpe_tstat(
     if not math.isfinite(sharpe) or not math.isfinite(error) or error == 0.0:
         return float("nan")
     return float(sharpe / error)
+
+
+def probabilistic_sharpe_ratio(
+    returns: pd.Series,
+    benchmark_sharpe: float = 0.0,
+    risk_free_rate: float = 0.0,
+) -> float:
+    """Probability the true annualised Sharpe beats ``benchmark_sharpe``.
+
+    Bailey and Lopez de Prado (2012). Two things it fixes that a plain t-stat does not.
+    It reads out as a probability rather than as a number you have to remember the bar
+    for, and the denominator carries the skew and the fat tails of the actual series
+    instead of assuming they are normal:
+
+        z = (SR - SR_0) * sqrt(n - 1) / sqrt(1 - skew * SR + (kurtosis - 1) / 4 * SR^2)
+
+    with both Sharpes per period inside the formula. Set skew to zero and kurtosis to 3
+    and the denominator collapses to ``sqrt(1 + SR^2 / 2)``, which is Lo's iid result, so
+    this is that same bar with the third and fourth moments allowed to matter. Negative
+    skew and fat tails both push the probability down, which is the right direction: those
+    are the series where a good-looking mean is least trustworthy.
+    """
+    sample = returns.dropna()
+    n = len(sample)
+    if n < 3:
+        return float("nan")
+
+    annualised = sharpe_ratio(sample, risk_free_rate)
+    if not math.isfinite(annualised):
+        return float("nan")
+
+    observed = annualised / math.sqrt(TRADING_DAYS)
+    hurdle = benchmark_sharpe / math.sqrt(TRADING_DAYS)
+    # pandas reports excess kurtosis; the formula wants the raw fourth moment.
+    kurtosis = float(sample.kurtosis()) + 3.0
+    variance = 1.0 - float(sample.skew()) * observed + 0.25 * (kurtosis - 1.0) * observed**2
+    if not variance > 0.0:
+        return float("nan")
+
+    return float(NormalDist().cdf((observed - hurdle) * math.sqrt(n - 1) / math.sqrt(variance)))
+
+
+def expected_max_sharpe(trials: int, sharpe_spread: float) -> float:
+    """The best Sharpe you would expect from ``trials`` tries at a strategy with no edge.
+
+    Bailey and Lopez de Prado (2014). Search a null hard enough and the winning cell still
+    looks good, and this says how good:
+
+        E[max SR] = spread * ((1 - g) * Z(1 - 1/N) + g * Z(1 - 1/(N * e)))
+
+    for ``g`` the Euler-Mascheroni constant and ``Z`` the inverse normal CDF. Linear in
+    the spread, so annualised in gives annualised out.
+
+    ``sharpe_spread`` is the standard deviation of the Sharpes actually tried, which is
+    what makes this specific to one search rather than to searches in general: a grid
+    whose cells all land in the same place has little room to flatter its winner.
+    """
+    if trials < 2 or not sharpe_spread > 0.0:
+        return 0.0
+    normal = NormalDist()
+    return float(
+        sharpe_spread
+        * (
+            (1.0 - EULER_MASCHERONI) * normal.inv_cdf(1.0 - 1.0 / trials)
+            + EULER_MASCHERONI * normal.inv_cdf(1.0 - 1.0 / (trials * math.e))
+        )
+    )
+
+
+@dataclass(frozen=True)
+class SearchDeflation:
+    """What looking at a grid of parameters costs the headline Sharpe."""
+
+    #: Grid cells that produced a usable Sharpe. Not independent tries, see ``deflate``.
+    trials: int
+    #: Spread of Sharpe across those cells, annualised.
+    sharpe_spread: float
+    #: The Sharpe this search would be expected to throw up from noise alone, annualised.
+    expected_max_sharpe: float
+    #: P(true Sharpe > 0), skew and kurtosis corrected, nothing charged for the search.
+    probabilistic: float
+    #: P(true Sharpe > expected_max_sharpe). The number that survives the search.
+    deflated: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            key: None if isinstance(v, float) and not math.isfinite(v) else v
+            for key, v in asdict(self).items()
+        }
+
+
+def deflate(
+    returns: pd.Series,
+    grid_sharpes: Sequence[float],
+    *,
+    risk_free_rate: float = 0.0,
+) -> SearchDeflation | None:
+    """Charge the parameter search against the reported Sharpe.
+
+    The grid is already being re-run for the sensitivity heatmap, so the two inputs the
+    correction needs are sitting there for free: how many configurations were looked at,
+    and how far apart their Sharpes came out. That turns the grid from a picture into an
+    input, which is the main reason this is worth doing at all.
+
+    One honesty note that belongs next to the number and not buried in a doc: adjacent
+    grid cells are nowhere near independent, since a 120-session lookback and a
+    126-session one are very nearly the same strategy. The expected-maximum result assumes
+    they are. Using the observed spread absorbs part of that, because correlated cells
+    land closer together, but the trial count is still generous. So this is a floor on the
+    penalty rather than the whole of it.
+
+    None when fewer than two cells produced a number, since a spread needs two.
+    """
+    usable = [float(s) for s in grid_sharpes if math.isfinite(float(s))]
+    if len(usable) < 2:
+        return None
+
+    spread = float(np.std(usable, ddof=1))
+    hurdle = expected_max_sharpe(len(usable), spread)
+    return SearchDeflation(
+        trials=len(usable),
+        sharpe_spread=spread,
+        expected_max_sharpe=hurdle,
+        probabilistic=probabilistic_sharpe_ratio(returns, 0.0, risk_free_rate),
+        deflated=probabilistic_sharpe_ratio(returns, hurdle, risk_free_rate),
+    )
 
 
 def sortino_ratio(returns: pd.Series, risk_free_rate: float = 0.0) -> float:

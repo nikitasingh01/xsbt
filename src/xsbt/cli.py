@@ -306,6 +306,11 @@ def _print_summary(data: ReportData) -> None:
     )
     for label, value in rows:
         table.add_row(label, value)
+    if data.deflation is not None:
+        table.add_row(
+            "deflated Sharpe",
+            f"{data.deflation.deflated:.0%} over {data.deflation.trials} configs",
+        )
     console.print(table)
 
 

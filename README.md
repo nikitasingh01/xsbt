@@ -57,15 +57,19 @@ rebalance, long the top quintile and short the bottom, costed at 10bps per unit 
 | Max drawdown | -34.9% | -64.6% |
 | Turnover p.a. | 9.0x | 18.7x |
 | Breakeven cost | 17bps | none, it loses at zero cost |
+| P(true Sharpe > 0), search charged | 28% | 0% |
 
 The t-stat carries a Newey-West error bar over one holding period rather than the iid one,
 since a book held for a month leaves its daily returns correlated. Both bars are on the
-report so the size of that adjustment is visible.
+report so the size of that adjustment is visible. The last row goes further and charges for
+the 20 grid cells that ran, so it is asking whether the cell I picked beat the best cell the
+search would throw up from noise alone.
 
 Neither strategy is tradeable. Momentum cannot be told apart from zero over this sample, and
-a 17bps breakeven leaves nothing over a realistic 10bps once size is involved. Reversal is
-significantly negative, and its per-name table says why: the damage is concentrated in
-shorting NVDA, TSLA, NFLX and AAPL.
+its 0.12 Sharpe sits under the 0.26 the same grid produces from noise, so it does not clear
+its own search either. A 17bps breakeven leaves nothing over a realistic 10bps once size is
+involved. Reversal is significantly negative, and its per-name table says why: the damage is
+concentrated in shorting NVDA, TSLA, NFLX and AAPL.
 
 Forty survivors give an 8-long, 8-short book, which is thin. Read these as a check that the
 machinery works, not as an estimate of the effect. The report says so on its own front page.
@@ -141,6 +145,7 @@ hit rate, skew, VaR and CVaR), the sections that move a decision:
 | Beta and alpha vs SPY | Is this repackaged market exposure? |
 | Turnover and cost drag | What does this cost to run? |
 | Parameter grid, lookback x top fraction | Is the config a cherry-picked peak? |
+| Deflated Sharpe over that grid | Would the search alone have produced this? |
 | Yearly returns and rolling Sharpe | Does it work outside one lucky regime? |
 | Assumptions and caveats | What does this backtest not capture? |
 

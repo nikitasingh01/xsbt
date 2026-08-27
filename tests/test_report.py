@@ -88,6 +88,40 @@ def test_costs_only_ever_reduce_the_headline(report: ReportData) -> None:
 def test_the_grid_is_dropped_rather_than_faked_without_prices(report: ReportData) -> None:
     assert report.grid is None
     assert report.names is None
+    assert report.deflation is None
+
+
+def test_the_search_is_charged_against_the_cells_that_actually_ran(
+    report_with_grid: ReportData,
+) -> None:
+    """The grid stops being decoration here and becomes the input to the correction.
+
+    Every cell that produced a Sharpe is a configuration somebody looked at, so the two
+    counts have to agree. If the grid grows a row and the trial count does not follow,
+    the page is quietly under-charging for the search.
+    """
+    grid = report_with_grid.grid
+    deflation = report_with_grid.deflation
+
+    assert grid is not None
+    assert deflation is not None
+    assert deflation.trials == int(grid.notna().to_numpy().sum())
+    assert deflation.expected_max_sharpe >= 0.0
+    assert 0.0 <= deflation.deflated <= deflation.probabilistic <= 1.0
+
+
+def test_the_verdict_owns_up_to_the_search_once_there_is_one(
+    report: ReportData, report_with_grid: ReportData
+) -> None:
+    """Without a grid it says nothing was charged, and that has to stay true.
+
+    This is the sentence a PM reads first, so it is the one place the page cannot be
+    vague about what the t-statistic has and has not been corrected for.
+    """
+    assert "charges nothing for the parameter combinations" in significance_note(report.net)
+    assert "configurations searched" in significance_note(
+        report_with_grid.net, report_with_grid.deflation
+    )
 
 
 def test_per_name_attribution_adds_up_to_the_gross_pnl(
@@ -296,6 +330,41 @@ def test_the_grid_section_appears_only_when_there_is_a_grid(
     assert render(report_with_grid).count("data:image/png;base64,") == BASE_FIGURES + 1
 
 
+def test_the_search_cost_block_follows_the_grid_onto_the_page(
+    report: ReportData, report_with_grid: ReportData
+) -> None:
+    assert "What the search costs" not in render(report)
+    assert "What the search costs" in render(report_with_grid)
+
+
+def test_the_page_says_so_when_the_winning_cell_loses_to_its_own_search(
+    report_with_grid: ReportData,
+) -> None:
+    """Momentum hits this on the real data, and it is the sharpest line in the section.
+
+    A Sharpe below the best-from-noise hurdle is a stronger argument against the strategy
+    than a weak t-statistic is, and it is invisible unless the page compares the two
+    numbers for the reader.
+    """
+    deflation = report_with_grid.deflation
+    assert deflation is not None
+
+    def prose(data: ReportData) -> str:
+        # Whitespace-normalised, because the template wraps and a phrase worth asserting
+        # on is longer than a line.
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", render(data)))
+
+    beaten = dataclasses.replace(
+        report_with_grid, deflation=dataclasses.replace(deflation, expected_max_sharpe=9.0)
+    )
+    clear = dataclasses.replace(
+        report_with_grid, deflation=dataclasses.replace(deflation, expected_max_sharpe=-9.0)
+    )
+
+    assert "not beating its own search" in prose(beaten)
+    assert "not beating its own search" not in prose(clear)
+
+
 def test_the_page_renders_without_a_benchmark(panel: pd.DataFrame) -> None:
     config = make_backtest_config(panel)
     run = run_backtest(panel, Momentum(config.strategy), config)
@@ -372,6 +441,7 @@ def test_metrics_json_holds_no_invalid_literals(report: ReportData, tmp_path: Pa
     assert payload["config"]["name"] == report.result.config.name
     assert payload["net"]["sessions"] == report.net.sessions
     assert payload["parameter_grid"] is None
+    assert payload["search_deflation"] is None
 
 
 def test_metrics_json_is_the_same_bytes_for_the_same_snapshot(
@@ -400,10 +470,13 @@ def test_the_grid_is_flattened_into_labelled_records(
 ) -> None:
     payload = json.loads(write_metrics(report_with_grid, tmp_path / "m.json").read_text())
     grid = report_with_grid.grid
+    deflation = report_with_grid.deflation
 
     assert grid is not None
+    assert deflation is not None
     assert len(payload["parameter_grid"]) == grid.size
     assert set(payload["parameter_grid"][0]) == {"lookback_days", "top_fraction", "sharpe"}
+    assert payload["search_deflation"]["trials"] == deflation.trials
 
 
 def test_write_html_creates_the_directory_it_was_pointed_at(
