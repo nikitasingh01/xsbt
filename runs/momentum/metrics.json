@@ -1,7 +1,7 @@
 {
   "run": {
     "xsbt_version": "0.1.0",
-    "git_commit": "c64989f72bbc723686d98b0f4cc84fe97894d828",
+    "git_commit": "e678e9cb974798401481f6a40d3b12dd9d22fbd9",
     "config_fingerprint": "f011000bef32900dcdbc792a86cda464746d46345753c22345c890b8438e5d31",
     "data_snapshot_id": "1e9d1fe315c7835695a6161da7e57300c0cd6014394dc45d25e670c646d4fd60",
     "strategy": "Momentum",
