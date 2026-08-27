@@ -126,6 +126,7 @@ you different prices for 2015. That makes "reliably and reproducibly" in the bri
 data-layer problem rather than a caching one:
 
 * one parquet per ticker holding the payload as fetched, raw OHLCV plus adjusted close,
+  and the dividends and splits that adjustment was built from,
 * `manifest.json` with per-ticker fetch time, row count, first and last session, requested
   window and a SHA-256 of the file,
 * `snapshot_id` is a SHA-256 over the manifest, embedded in every run,
@@ -134,6 +135,43 @@ data-layer problem rather than a caching one:
 A run is reproducible against **the bytes we actually saw**, which is the strongest claim
 available without paying for point-in-time data. It is not the same as the data being
 right, and `docs/ASSUMPTIONS.md` says so.
+
+Which is why the events are stored too. A hash catches a cache that moved under us; it
+cannot catch a vendor that adjusted wrongly in the first place, and adjusted close is the
+one field in the snapshot Yahoo derived rather than observed. Everything downstream keys
+off it, so a missed dividend puts a fake return on an ex-date with nothing looking broken.
+Holding the dividends next to it makes that checkable: `f = 1 - amount / close on the
+session before the ex-date`, and the factor at any date is the product of every such factor
+still ahead of it. `fetch` and `verify` rebuild `adj_close / close` that way and compare.
+
+Two things I got wrong on the first attempt, both from assuming rather than measuring.
+
+Splits do not belong in that product. Yahoo's close is already split-adjusted **and** it
+restates dividend amounts into post-split units, so both sides of the division move
+together and the split cancels. NVDA is the clean case: its 2012 payout of $0.075 comes
+back as $0.001875 after the 4:1 and 10:1. Multiplying by the split ratio as well threw a
+40x error. Splits are still checked, just not separately, since one folded into `close` and
+not into `adj_close` would leave a step no dividend explains.
+
+And levels cannot be compared, only shapes. Four names failed at first with a constant
+offset, which looked like an ex-date off-by-one until I checked XOM: 66 dividends, all
+aligned, and `adj_close / close` on the last bar was 0.993566 rather than 1.0. That is
+1.03/160, one quarterly dividend that went ex **after** the last bar we hold. The vendor
+adjusts for it and we cannot, because we do not have the event. So both series are divided
+by their last value and the leftover is reported as `unexplained_level` instead of failing.
+It is harmless: a constant scale on every price cancels out of every return. Nine of the 41
+names carry one.
+
+With that settled the tolerance could be measured instead of guessed. Across the universe,
+2700-odd dividends and 26 splits, the worst disagreement is 9.2e-07, which is Yahoo
+rounding `adj_close` to about seven significant figures. One missed dividend on a large cap
+is around 5e-3. `DEFAULT_TOLERANCE = 1e-4` sits between the two with two orders of
+magnitude of room on each side.
+
+Adding the two event columns is a schema change, so `SCHEMA_VERSION` went to 2 and old
+snapshots are refused rather than read with the columns missing. A half-populated cache
+would make this check pass on names it never actually looked at, which is the worst
+possible failure for a check like this.
 
 The same argument applies one level up, to the libraries. `pyproject.toml` carries ranges,
 because ranges are what the package supports; `constraints.txt` carries the exact set the
@@ -159,8 +197,8 @@ up to a ceiling, and honours `Retry-After` when the server sends one.
 by anything, and has no migration story. A database earns its keep when you need
 cross-sectional queries over a universe too big for memory, which is not this.
 
-**Rejected:** storing only adjusted close. Halves the file size and throws away any chance
-of reconstructing what the adjustment did.
+**Rejected:** storing only adjusted close. Halves the file size and throws away the raw
+close the reconstruction above needs, so the check could not exist.
 
 ---
 

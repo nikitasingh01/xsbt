@@ -1,9 +1,9 @@
 {
   "xsbt_version": "0.1.0",
-  "run_utc": "2026-08-27T04:56:50+00:00",
-  "git_commit": "800eecb4ed48bed3f2f8290159578d5bde55f625",
+  "run_utc": "2026-08-27T05:22:24+00:00",
+  "git_commit": "c64989f72bbc723686d98b0f4cc84fe97894d828",
   "config_fingerprint": "6277b9fa0018c72070ec0a6091b7074eb6cae948533f76e0ae8480312520ca42",
-  "data_snapshot_id": "4d9fe878631df9690007e5f6b3717547556a3ea8f0f97b090f0b15343146d702",
+  "data_snapshot_id": "1e9d1fe315c7835695a6161da7e57300c0cd6014394dc45d25e670c646d4fd60",
   "strategy": "Reversal",
   "universe_size": 40,
   "sessions": 4169,

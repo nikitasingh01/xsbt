@@ -10,6 +10,14 @@ import pandas as pd
 
 PRICE_COLUMNS: tuple[str, ...] = ("open", "high", "low", "close", "adj_close", "volume")
 
+#: Corporate actions carried alongside the bars, NaN on every session without one. Kept
+#: because ``adj_close`` is the vendor's own derived field and these are what it is derived
+#: from, so holding both lets us check one against the other (see data/adjustment.py).
+EVENT_COLUMNS: tuple[str, ...] = ("dividend", "split_ratio")
+
+#: The full on-disk and in-memory schema for one ticker.
+BAR_COLUMNS: tuple[str, ...] = PRICE_COLUMNS + EVENT_COLUMNS
+
 DATE_INDEX_NAME = "date"
 
 
@@ -40,7 +48,7 @@ class PriceSource(Protocol):
     name: str
 
     def fetch(self, ticker: str, start: dt.date, end: dt.date) -> pd.DataFrame:
-        """Bars over ``[start, end]`` inclusive, indexed by date, columns PRICE_COLUMNS."""
+        """Bars over ``[start, end]`` inclusive, indexed by date, columns BAR_COLUMNS."""
         ...
 
 

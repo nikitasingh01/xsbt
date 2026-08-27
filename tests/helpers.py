@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -71,20 +72,46 @@ class StubSource:
         return self.frames[ticker].loc[str(start) : str(end)]
 
 
-def make_bars(dates: pd.DatetimeIndex, closes: np.ndarray, volume: float = 1e7) -> pd.DataFrame:
-    """Bar frame in the shape a PriceSource returns."""
+def make_bars(
+    dates: pd.DatetimeIndex,
+    closes: np.ndarray,
+    volume: float = 1e7,
+    *,
+    adj_close: np.ndarray | None = None,
+    dividends: Mapping[str, float] | None = None,
+    splits: Mapping[str, float] | None = None,
+) -> pd.DataFrame:
+    """Bar frame in the shape a PriceSource returns.
+
+    Corporate actions default to none and ``adj_close`` to the raw close, which is a
+    consistent pair: nothing went ex, so nothing was adjusted.
+    """
     closes = np.asarray(closes, dtype="float64")
+    index = pd.DatetimeIndex(dates, name="date")
     return pd.DataFrame(
         {
             "open": closes,
             "high": closes,
             "low": closes,
             "close": closes,
-            "adj_close": closes,
+            "adj_close": closes if adj_close is None else np.asarray(adj_close, dtype="float64"),
             "volume": np.full(len(closes), volume),
+            "dividend": _on_dates(dividends, index),
+            "split_ratio": _on_dates(splits, index),
         },
-        index=pd.DatetimeIndex(dates, name="date"),
+        index=index,
     )
+
+
+def _on_dates(events: Mapping[str, float] | None, index: pd.DatetimeIndex) -> pd.Series:
+    """Sparse events keyed by date string, laid onto the bar index."""
+    blank = pd.Series(np.nan, index=index, dtype="float64")
+    if not events:
+        return blank
+    dated = pd.Series(
+        {pd.Timestamp(day): float(value) for day, value in events.items()}, dtype="float64"
+    )
+    return dated.reindex(index)
 
 
 def random_walk_panel(

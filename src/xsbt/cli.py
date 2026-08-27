@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import math
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -111,6 +112,12 @@ def fetch(
             console.print(f"  [yellow]missing[/] {ticker}: {reason}")
         console.print(f"  snapshot {market.snapshot_id[:16]}")
 
+        # Reconciled here as well as in `verify`, because this is the moment the data
+        # arrives and a vendor that adjusted wrongly is worth knowing about before forty
+        # names go into a backtest. Reported rather than fatal: the bars are cached and
+        # inspectable either way, and `verify` is the command that gates on it.
+        _report_adjustments(repository.cache)
+
 
 @app.command()
 def run(
@@ -198,10 +205,20 @@ def report(
 @app.command()
 def verify(
     cache_dir: Annotated[Path, typer.Option(help="Snapshot directory.")] = Path("data/cache"),
+    adjustments: Annotated[
+        bool,
+        typer.Option(
+            "--adjustments/--no-adjustments",
+            help="Also rebuild adjusted close from each ticker's own dividends.",
+        ),
+    ] = True,
 ) -> None:
-    """Re-hash every cached file against the manifest.
+    """Check the snapshot two ways: the bytes, and the vendor's arithmetic.
 
-    Non-zero exit if anything drifted, so this can sit in a scheduled job.
+    Hashing catches a cache that moved under us. It cannot catch a vendor that adjusted
+    wrongly in the first place, so adjusted close is also rebuilt from the dividends and
+    splits sitting in the same files. Non-zero exit if either fails, so this can sit in a
+    scheduled job.
     """
     with friendly_errors():
         cache = PriceCache(cache_dir)
@@ -216,8 +233,36 @@ def verify(
 
         console.print(f"{len(entries) - len(problems)} of {len(entries)} tickers verified")
         console.print(f"snapshot {cache.snapshot_id[:16]}")
-        if problems:
+
+        failed = _report_adjustments(cache) if adjustments else 0
+        if problems or failed:
             raise typer.Exit(code=1)
+
+
+def _report_adjustments(cache: PriceCache) -> int:
+    """Print the adjustment audit and return how many tickers failed it."""
+    audits = cache.audit_adjustments()
+    if not audits:
+        return 0
+
+    bad = [audit for audit in audits if not audit.ok]
+    for audit in bad:
+        console.print(f"[red]{audit.ticker}[/] {audit.complaint()}")
+
+    worst = max(audit.max_error for audit in audits if math.isfinite(audit.max_error))
+    console.print(f"{len(audits) - len(bad)} of {len(audits)} adjusted closes reconciled")
+    console.print(f"  worst gap against the reported events: {worst:.2e}")
+
+    # Normal and worth saying out loud, because the alternative reading is that the check
+    # found something. A dividend that went ex after the last bar leaves a constant scale
+    # on every price, which cancels out of every return.
+    outside = [a for a in audits if abs(a.unexplained_level - 1.0) > 1e-6]
+    if outside:
+        console.print(
+            f"  {len(outside)} carry an adjustment dated after their last bar, which is "
+            "a level shift and does not move returns"
+        )
+    return len(bad)
 
 
 @contextmanager

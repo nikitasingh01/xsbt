@@ -264,6 +264,44 @@ def test_verify_says_so_rather_than_passing_an_empty_cache(project: Project) -> 
     assert "no cached tickers" in result.output
 
 
+def test_verify_also_reconciles_adjusted_close_against_the_events(project: Project) -> None:
+    """Hashing proves the bytes have not moved. It says nothing about whether the vendor
+    got the adjustment right, which is what this second half of the command is for."""
+    result = runner.invoke(app, ["verify", "--cache-dir", "data/cache"])
+
+    assert result.exit_code == 0, result.output
+    assert "adjusted closes reconciled" in result.output
+
+
+def test_verify_fails_when_a_dividend_went_unadjusted(project: Project) -> None:
+    cache = PriceCache(project.cache_dir)
+    ticker = next(iter(cache.manifest.entries))
+    bars = cache.read(ticker)
+    # A 5% payout the adjusted series knows nothing about.
+    bars.iloc[5, bars.columns.get_loc("dividend")] = bars["close"].iloc[4] * 0.05
+    cache.write(
+        ticker,
+        bars,
+        source="stub",
+        requested_start=bars.index[0].date(),
+        requested_end=bars.index[-1].date(),
+    )
+
+    result = runner.invoke(app, ["verify", "--cache-dir", "data/cache"])
+
+    assert result.exit_code == 1
+    assert "away from its own events" in result.output
+
+
+def test_verify_can_skip_the_adjustment_check(project: Project) -> None:
+    """The hash check is fast and the reconstruction is not, so it can be left out of a
+    tight loop."""
+    result = runner.invoke(app, ["verify", "--cache-dir", "data/cache", "--no-adjustments"])
+
+    assert result.exit_code == 0, result.output
+    assert "adjusted closes reconciled" not in result.output
+
+
 def test_fetch_populates_the_cache_from_the_source(
     tmp_path: Path, panel: pd.DataFrame, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -293,6 +331,8 @@ def test_fetch_populates_the_cache_from_the_source(
     cache = PriceCache(tmp_path / "data" / "cache")
     assert set(cache.manifest.entries) == {*panel.columns, "SPY"}
     assert cache.verify() == {}
+    # Reconciled on the way in, not only when someone remembers to run verify.
+    assert "adjusted closes reconciled" in result.output
 
 
 def test_fetch_reports_the_names_it_could_not_get(

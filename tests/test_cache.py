@@ -122,3 +122,48 @@ def test_missing_manifest_starts_empty(tmp_path: Path) -> None:
 
     assert cache.manifest.entries == {}
     assert not cache.has("AAA")
+
+
+def test_corporate_actions_survive_the_round_trip(tmp_path: Path) -> None:
+    """The events are sparse and mostly NaN, which parquet is entitled to store however
+    it likes. Worth pinning, because the audit reads them back out of here."""
+    dates = pd.bdate_range("2020-01-01", periods=10, name="date")
+    bars = make_bars(
+        dates,
+        np.linspace(100.0, 109.0, 10),
+        dividends={"2020-01-08": 0.5},
+        splits={"2020-01-10": 2.0},
+    )
+
+    cache = PriceCache(tmp_path)
+    cache.write("AAA", bars, source="stub", requested_start=START, requested_end=END)
+    read = cache.read("AAA")
+
+    assert read["dividend"].dropna().to_dict() == {pd.Timestamp("2020-01-08"): 0.5}
+    assert read["split_ratio"].dropna().to_dict() == {pd.Timestamp("2020-01-10"): 2.0}
+
+
+def test_audit_adjustments_sorts_the_failures_to_the_front(tmp_path: Path) -> None:
+    """Forty names print at once, so the ordering is what makes the output readable."""
+    dates = pd.bdate_range("2020-01-01", periods=10, name="date")
+    closes = np.full(10, 100.0)
+    cache = PriceCache(tmp_path)
+
+    # GOOD adjusted for its dividend, BAD ignored one, WORSE ignored a bigger one.
+    for ticker, adjusted, dividend in (
+        ("GOOD", closes * np.array([0.995] * 7 + [1.0] * 3), 0.5),
+        ("BAD", closes, 0.5),
+        ("WORSE", closes, 5.0),
+    ):
+        cache.write(
+            ticker,
+            make_bars(dates, closes, adj_close=adjusted, dividends={"2020-01-10": dividend}),
+            source="stub",
+            requested_start=START,
+            requested_end=END,
+        )
+
+    audits = cache.audit_adjustments()
+
+    assert [a.ticker for a in audits] == ["WORSE", "BAD", "GOOD"]
+    assert [a.ok for a in audits] == [False, False, True]

@@ -61,7 +61,8 @@ CAVEATS: tuple[tuple[str, str], ...] = (
         "Restated history",
         "Yahoo rewrites adjusted close every time a dividend or split lands, so the same "
         "query run a month apart gives different history. The run is pinned to a cache "
-        "snapshot id so at least it is reproducible against the bytes we actually saw.",
+        "snapshot id so at least it is reproducible against the bytes we actually saw, and "
+        "xsbt verify rebuilds that adjusted close from the dividends stored beside it.",
     ),
     (
         "Costs",

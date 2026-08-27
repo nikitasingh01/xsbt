@@ -14,7 +14,12 @@ from typing import Any
 import pandas as pd
 import requests
 
-from xsbt.data.base import DATE_INDEX_NAME, PRICE_COLUMNS, FetchError, TickerNotFoundError
+from xsbt.data.base import (
+    BAR_COLUMNS,
+    DATE_INDEX_NAME,
+    FetchError,
+    TickerNotFoundError,
+)
 
 log = logging.getLogger(__name__)
 
@@ -82,12 +87,7 @@ def parse_chart_payload(payload: dict[str, Any], ticker: str) -> pd.DataFrame:
 
     # Timestamps are the bar's open in exchange local time. Read as UTC, a 19:00 Sydney
     # open lands on the next calendar day, so convert before taking the date.
-    index = (
-        pd.to_datetime(pd.Series(timestamps), unit="s", utc=True)
-        .dt.tz_convert(tz_name)
-        .dt.normalize()
-        .dt.tz_localize(None)
-    )
+    index = _to_session_dates(timestamps, tz_name)
 
     frame = pd.DataFrame(
         {
@@ -106,13 +106,50 @@ def parse_chart_payload(payload: dict[str, Any], ticker: str) -> pd.DataFrame:
     frame = frame.dropna(subset=["adj_close"])
     # The live bar sometimes repeats the previous one.
     frame = frame[~frame.index.duplicated(keep="last")].sort_index()
-    return frame[list(PRICE_COLUMNS)]
+
+    events = result.get("events") or {}
+    frame["dividend"] = _event_series(events.get("dividends"), "amount", tz_name, frame.index)
+    frame["split_ratio"] = _event_series(events.get("splits"), "numerator", tz_name, frame.index)
+    return frame[list(BAR_COLUMNS)]
+
+
+def _to_session_dates(timestamps: Any, tz_name: str) -> pd.DatetimeIndex:
+    """Epoch seconds at the exchange open, reduced to the local calendar date."""
+    stamps = pd.to_datetime(pd.Series(timestamps, dtype="int64"), unit="s", utc=True)
+    return pd.DatetimeIndex(stamps.dt.tz_convert(tz_name).dt.normalize().dt.tz_localize(None))
+
+
+def _event_series(
+    events: Any,
+    field: str,
+    tz_name: str,
+    index: pd.DatetimeIndex,
+) -> pd.Series:
+    """One corporate action field aligned onto the bar index, NaN where nothing happened.
+
+    Yahoo keys these by epoch second rather than by date, and the key is not always the
+    same second as the bar it belongs to, so the timestamp inside each record is what gets
+    converted. Actions that land outside the returned bars are dropped here; the
+    adjustment audit notices them by a different route.
+    """
+    blank = pd.Series(float("nan"), index=index, dtype="float64")
+    if not events:
+        return blank
+
+    records = list(events.values())
+    dates = _to_session_dates([record["date"] for record in records], tz_name)
+    values = pd.Series(
+        [float(record[field]) for record in records], index=dates, dtype="float64"
+    ).sort_index()
+    # Two actions on one session would be a vendor error; keep the last and move on.
+    values = values[~values.index.duplicated(keep="last")]
+    return values.reindex(index)
 
 
 def empty_frame() -> pd.DataFrame:
     """Correctly typed empty bar frame."""
     return pd.DataFrame(
-        {col: pd.Series(dtype="float64") for col in PRICE_COLUMNS},
+        {col: pd.Series(dtype="float64") for col in BAR_COLUMNS},
         index=pd.DatetimeIndex([], name=DATE_INDEX_NAME),
     )
 

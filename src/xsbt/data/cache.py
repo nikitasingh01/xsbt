@@ -12,18 +12,23 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-from xsbt.data.base import PRICE_COLUMNS
+from xsbt.data.adjustment import DEFAULT_TOLERANCE, AdjustmentAudit, audit_adjustment
+from xsbt.data.base import BAR_COLUMNS
 
 log = logging.getLogger(__name__)
 
 MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = 1
+# Bumped to 2 when dividends and splits joined the bar schema. Old snapshots are refused
+# rather than read with two columns missing, because a half-populated cache would make the
+# adjustment audit quietly pass on names it never checked.
+SCHEMA_VERSION = 2
 
 
 def digest_frame(frame: pd.DataFrame) -> str:
@@ -127,7 +132,7 @@ class PriceCache:
 
     def read(self, ticker: str) -> pd.DataFrame:
         frame = pd.read_parquet(self.path_for(ticker))
-        return frame[list(PRICE_COLUMNS)].sort_index()
+        return frame[list(BAR_COLUMNS)].sort_index()
 
     def write(
         self,
@@ -139,7 +144,7 @@ class PriceCache:
         requested_end: dt.date,
     ) -> CacheEntry:
         self.prices_dir.mkdir(parents=True, exist_ok=True)
-        frame = frame[list(PRICE_COLUMNS)].sort_index()
+        frame = frame[list(BAR_COLUMNS)].sort_index()
 
         path = self.path_for(ticker)
         tmp = path.with_suffix(".parquet.tmp")
@@ -175,6 +180,28 @@ class PriceCache:
                     f"hash mismatch (manifest {entry.sha256[:12]}, file {actual[:12]})"
                 )
         return problems
+
+    def audit_adjustments(self, *, tolerance: float = DEFAULT_TOLERANCE) -> list[AdjustmentAudit]:
+        """Rebuild every ticker's adjusted close from its own dividends and compare.
+
+        Hashing proves the bytes have not moved since we fetched them. It says nothing
+        about whether they were right in the first place, and ``adj_close`` is the one
+        field in the snapshot the vendor derived rather than observed. This is the check
+        that covers it. Ordered worst first, so the interesting rows come out on top.
+        """
+        audits = [
+            audit_adjustment(ticker, self.read(ticker), tolerance=tolerance)
+            for ticker in sorted(self.manifest.entries)
+            if self.path_for(ticker).exists()
+        ]
+
+        # A NaN error means it could not be reconstructed at all, which is the worst
+        # outcome rather than an unsortable one, so it goes to the front.
+        def severity(audit: AdjustmentAudit) -> tuple[bool, float]:
+            error = audit.max_error
+            return audit.ok, -error if math.isfinite(error) else -math.inf
+
+        return sorted(audits, key=severity)
 
     @property
     def snapshot_id(self) -> str:

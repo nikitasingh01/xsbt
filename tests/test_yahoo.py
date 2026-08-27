@@ -9,7 +9,7 @@ import requests
 
 from tests.helpers import FakeResponse, FakeSession
 from xsbt.data import yahoo
-from xsbt.data.base import PRICE_COLUMNS, FetchError, TickerNotFoundError
+from xsbt.data.base import BAR_COLUMNS, PRICE_COLUMNS, FetchError, TickerNotFoundError
 from xsbt.data.yahoo import YahooFinanceSource, parse_chart_payload
 
 
@@ -28,7 +28,7 @@ def slept(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 def test_parses_recorded_payload(aapl_payload: dict[str, Any]) -> None:
     frame = parse_chart_payload(aapl_payload, "AAPL")
 
-    assert list(frame.columns) == list(PRICE_COLUMNS)
+    assert list(frame.columns) == list(BAR_COLUMNS)
     assert frame.index.name == "date"
     assert isinstance(frame.index, pd.DatetimeIndex)
     assert frame.index.tz is None
@@ -37,7 +37,61 @@ def test_parses_recorded_payload(aapl_payload: dict[str, Any]) -> None:
     # 2023-01-01 and -02 were a weekend and New Year's Day.
     assert frame.index[0] == pd.Timestamp("2023-01-03")
     assert (frame["adj_close"] > 0).all()
-    assert frame.notna().all().all()
+    assert frame[list(PRICE_COLUMNS)].notna().all().all()
+
+
+def test_dividend_lands_on_its_own_session(aapl_payload: dict[str, Any]) -> None:
+    """AAPL went ex on 2023-02-10 for 23c.
+
+    Yahoo keys events by epoch second, and the key is not always the same second as the
+    bar, so this pins the conversion rather than the lookup.
+    """
+    frame = parse_chart_payload(aapl_payload, "AAPL")
+
+    paid = frame["dividend"].dropna()
+    assert paid.index.tolist() == [pd.Timestamp("2023-02-10")]
+    assert paid.iloc[0] == pytest.approx(0.23)
+    # Nothing split in the quarter, so that column stays empty.
+    assert frame["split_ratio"].isna().all()
+
+
+def test_a_payload_with_no_events_block_still_parses() -> None:
+    """Most quarters have no action at all. The columns still have to be there."""
+    payload = _chart_payload([_epoch("2023-01-03"), _epoch("2023-01-04")], closes=[10.0, 11.0])
+    assert "events" not in payload["chart"]["result"][0]
+
+    frame = parse_chart_payload(payload, "X")
+
+    assert frame["dividend"].isna().all()
+    assert frame["split_ratio"].isna().all()
+
+
+def test_an_action_dated_outside_the_bars_is_dropped() -> None:
+    """The window is clipped after the fact, so events can fall off either end.
+
+    Reindexing keeps them out. Left in, they would land as extra rows with no prices.
+    """
+    payload = _chart_payload([_epoch("2023-01-04")], closes=[10.0])
+    payload["chart"]["result"][0]["events"] = {
+        "dividends": {"1": {"amount": 0.5, "date": _epoch("2022-12-15")}}
+    }
+
+    frame = parse_chart_payload(payload, "X")
+
+    assert len(frame) == 1
+    assert frame["dividend"].isna().all()
+
+
+def test_a_split_is_carried_through_as_its_numerator() -> None:
+    """4:1 is stored as 4.0. The denominator is 1 for every split we have ever seen."""
+    payload = _chart_payload([_epoch("2023-01-03"), _epoch("2023-01-04")], closes=[40.0, 10.0])
+    payload["chart"]["result"][0]["events"] = {
+        "splits": {"1": {"numerator": 4, "denominator": 1, "date": _epoch("2023-01-04")}}
+    }
+
+    frame = parse_chart_payload(payload, "X")
+
+    assert frame["split_ratio"].dropna().to_dict() == {pd.Timestamp("2023-01-04"): 4.0}
 
 
 def test_adjusted_close_differs_from_close(aapl_payload: dict[str, Any]) -> None:
@@ -96,7 +150,7 @@ def test_valid_symbol_with_no_bars_returns_empty_frame() -> None:
     frame = parse_chart_payload(payload, "X")
 
     assert frame.empty
-    assert list(frame.columns) == list(PRICE_COLUMNS)
+    assert list(frame.columns) == list(BAR_COLUMNS)
 
 
 def test_error_block_raises_fetch_error(not_found_payload: dict[str, Any]) -> None:

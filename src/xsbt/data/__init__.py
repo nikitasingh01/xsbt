@@ -1,6 +1,9 @@
 """Data retrieval and on-disk snapshots."""
 
+from xsbt.data.adjustment import AdjustmentAudit, audit_adjustment, implied_adjustment
 from xsbt.data.base import (
+    BAR_COLUMNS,
+    EVENT_COLUMNS,
     PRICE_COLUMNS,
     CacheMissError,
     DataError,
@@ -16,7 +19,10 @@ from xsbt.data.universe import UniverseMember, load_universe
 from xsbt.data.yahoo import YahooFinanceSource, parse_chart_payload
 
 __all__ = [
+    "BAR_COLUMNS",
+    "EVENT_COLUMNS",
     "PRICE_COLUMNS",
+    "AdjustmentAudit",
     "CacheEntry",
     "CacheMissError",
     "DataError",
@@ -29,6 +35,8 @@ __all__ = [
     "TickerNotFoundError",
     "UniverseMember",
     "YahooFinanceSource",
+    "audit_adjustment",
+    "implied_adjustment",
     "load_market_data",
     "load_universe",
     "open_repository",

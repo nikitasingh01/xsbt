@@ -36,7 +36,7 @@ installing anything. The price cache is not, since it is 8 MB of vendor data tha
 | Data | `xsbt fetch` | parquet snapshot and `manifest.json`, one SHA-256 per ticker |
 | Backtest | `xsbt run` | `daily.parquet`, `weights.parquet`, `metrics.json`, `returns.csv` |
 | Report | `xsbt report` | one self-contained `report.html` |
-| Integrity | `xsbt verify` | re-hashes the cache, non-zero exit on drift |
+| Integrity | `xsbt verify` | re-hashes the cache and rebuilds adjusted close from its own dividends |
 
 Each stage is a separate verb. The files in between are inspectable, the report can be
 rebuilt without re-running the backtest, and only `fetch` touches the network.
@@ -118,6 +118,13 @@ file, and `snapshot_id` hashes the manifest. Same `config_fingerprint` plus same
 `snapshot_id` means the same numbers, and `metrics.json` keeps the wall clock out so two
 runs off one snapshot are byte-identical. The suite asserts that; `xsbt verify` re-hashes
 the cache and exits non-zero on drift.
+
+**The vendor's arithmetic is checked, not trusted.** A hash proves the bytes have not moved
+since we fetched them. It says nothing about whether they were right, and adjusted close is
+the one field Yahoo derived rather than observed, so a missed dividend would put a fake
+return on an ex-date with nothing looking broken. The snapshot therefore also stores the
+dividends and splits, and `fetch` and `verify` rebuild adjusted close from them and compare.
+On the current snapshot all 41 names reconcile, worst gap 9.2e-07.
 
 **The strategy is small because the engine is not.** The engine owns the rebalance calendar
 (resolved against real sessions, so month end is the last trading day), the execution lag
@@ -252,8 +259,10 @@ xsbt run --config configs/reversal.yaml --offline --no-grid    # skip the parame
 # Rebuild a report from a saved run, without re-running the backtest.
 xsbt report --run runs/momentum --out reports/momentum.html
 
-# Re-hash the cache against its manifest. Non-zero exit if anything drifted.
+# Re-hash the cache against its manifest, then rebuild adjusted close from the
+# dividends and splits stored alongside it. Non-zero exit if either disagrees.
 xsbt verify --cache-dir data/cache
+xsbt verify --cache-dir data/cache --no-adjustments   # hashes only, much faster
 ```
 
 `--verbose` turns up the xsbt logger without making third-party libraries noisy.
@@ -281,7 +290,7 @@ src/xsbt/
   cli.py            typer app: fetch | run | report | verify
   config.py         pydantic models, YAML loading, config fingerprint
   data/             base.py (protocols) yahoo.py cache.py repository.py
-                    universe.py market.py
+                    adjustment.py universe.py market.py
   strategies/       base.py (protocol, registry, rank base) momentum.py reversal.py
   engine/           calendar.py portfolio.py costs.py backtest.py
   analytics/        metrics.py attribution.py sensitivity.py

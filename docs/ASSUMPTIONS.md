@@ -22,6 +22,15 @@ split, so the same query a month later returns different 2015 prices. The cache 
 weaker claim than the data being right. Yahoo is also unofficial: no SLA, no documented
 schema, no correction notices.
 
+**The adjustment is checked against its own events, within limits.** The snapshot stores
+the dividends and splits alongside the prices, and `fetch` and `verify` rebuild
+`adj_close / close` from them. All 41 names reconcile to 9.2e-07 against a 1e-4 tolerance.
+Two things it cannot see. Only the shape is compared, not the level, because a dividend
+going ex after the last bar we hold is an adjustment we have no event for; that leaves a
+constant scale, which cancels out of every return, and gets reported rather than failed.
+And it can only check the events Yahoo chose to report, so a dividend missing from both the
+adjustment and the event list would pass. Catching that needs a second vendor.
+
 **Corporate actions are whatever the adjustment says.** Spin-offs, rights issues and
 ticker reuse are not handled. A recycled ticker would give a silently wrong series.
 
