@@ -66,7 +66,9 @@ ignore = [
 "tests/*" = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: mypy checks against the interpreter it runs under, and the CI matrix
+# covers 3.11 through 3.13, so each job checks its own. Pinning it to 3.11 made the newer jobs
+# choke on numpy's own stubs, which use `type` statements a 3.11 target refuses to parse.
 files = ["src/xsbt"]
 strict = true
 # pandas/matplotlib stubs are incomplete; typing every frame operation costs more than it pays.
