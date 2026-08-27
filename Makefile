@@ -13,7 +13,7 @@ help:
 	@echo "format-check ruff format --check, no writes"
 	@echo "typecheck    mypy on src/"
 	@echo "test         pytest (offline, no network)"
-	@echo "test-cov     pytest with coverage report"
+	@echo "test-cov     pytest with coverage, enforcing the floor in pyproject.toml"
 	@echo "check        everything CI runs, in the same order"
 	@echo "demo         fetch data, run both strategies, build both reports"
 	@echo "docker       build the container image"
@@ -46,7 +46,7 @@ test:
 test-cov:
 	$(PY) -m pytest --cov --cov-report=term-missing
 
-check: lint format-check typecheck test
+check: lint format-check typecheck test-cov
 
 # The only target that uses the network is the fetch. Both runs are --offline, which is
 # also a check that the snapshot the fetch just wrote is complete.
@@ -64,5 +64,5 @@ docker-run:
 	docker run --rm -v "$(PWD)/data:/app/data" -v "$(PWD)/runs:/app/runs" xsbt:latest --help
 
 clean:
-	rm -rf .pytest_cache .mypy_cache .ruff_cache .coverage htmlcov build dist *.egg-info
+	rm -rf .pytest_cache .mypy_cache .ruff_cache .hypothesis .coverage htmlcov build dist *.egg-info
 	find . -name __pycache__ -type d -prune -exec rm -rf {} +

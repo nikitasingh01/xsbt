@@ -4,6 +4,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# hypothesis keeps the inputs that failed here, so a rerun tries them first. Useful
+# locally, meaningless to anyone else.
+.hypothesis/
 .coverage
 htmlcov/
 

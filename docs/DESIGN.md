@@ -344,6 +344,23 @@ to produce on the day it was written, which locks in bugs and calls it regressio
 The Yahoo client runs against recorded JSON fixtures, including a 404 and a 429, so the
 suite is fully offline and CI never depends on a vendor being up.
 
+Hand-worked examples cannot pin the statements that have to hold for *every* input, and
+those are the ones a refactor breaks quietly. `tests/test_properties.py` covers that layer
+with hypothesis: the book is dollar neutral at gross 1.0 whatever the scores, a rank
+strategy reads the ordering and nothing else, each session earns on the book held into it,
+and net return falls as the cost rate rises. The last one is the assumption the breakeven
+bisection depends on, and nothing else was testing it.
+
+I checked they bite before keeping them. Moving the line that records weights by one
+position in `simulate` fails two; sizing the short leg off the leftover names instead of
+the slice fails three. A property test that passes on a broken engine is worse than no test,
+because it reads like coverage.
+
+Coverage itself is enforced rather than reported: `fail_under = 95` in `pyproject.toml`,
+against a current 97%, and `make check` runs it. The floor sits below the real figure on
+purpose. Pinning it to the exact number turns every new line into a coverage chore, and the
+job of a floor is to catch a chunk of the engine going untested, not to police a decimal.
+
 ---
 
 ## What I would do next

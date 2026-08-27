@@ -279,6 +279,13 @@ make check        # lint, format check, typecheck and the suite, what CI runs
 Individually: `make lint`, `make format`, `make typecheck`, `make test`, `make test-cov`,
 `make docker`.
 
+`make check` runs the suite under coverage against a 95% floor set in `pyproject.toml`. It
+is a ratchet, not a target: the suite sits at 97%, and the floor is there to catch a chunk
+of the engine going untested rather than to police a decimal. Alongside the hand-worked
+examples, `tests/test_properties.py` uses hypothesis for the claims that must hold on every
+input, such as the book being dollar neutral whatever the scores and net return falling as
+costs rise.
+
 CI runs the check on Python 3.11, 3.12 and 3.13 unpinned, to prove the ranges in
 `pyproject.toml` still resolve, then once more against `constraints.txt`, to prove the
 published numbers still reproduce, then a Docker build. Every test is offline and
